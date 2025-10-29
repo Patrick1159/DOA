@@ -1,0 +1,31 @@
+import torch
+import rospy
+
+class ExtractorConfig:
+    """Configuration constants for the feature extractor"""
+
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    # Model paths
+    FASTSAM_WEIGHTS_PATH = '/home/patrick/FastSAM/weights/FastSAM.pt'
+    CLIP_MODEL_NAME = "ViT-B/32"
+    
+    # Processing parameters
+    FOREGROUND_ONLY = False
+    BOOST_CLIP = True
+    RUN_SAM = True
+    ENABLE_MASK_DEBUG = True  # Enable mask debug visualization
+    
+    # SAM parameters
+    SAM_CONFIDENCE = 0.5
+    SAM_IOU = 0.8
+    SAM_IMAGE_SIZE = 128
+    
+    # ROI parameters
+    MAX_ROI_SIZE = 200
+    MIN_ROI_WIDTH = 10
+    MIN_ROI_HEIGHT = 10
+    
+    # Visualization parameters
+    FONT_SCALE = 0.7
+    FONT_THICKNESS = 2
+    MAX_COLORS = 100

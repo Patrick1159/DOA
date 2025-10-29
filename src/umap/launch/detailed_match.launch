@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Load parameters -->
+    <rosparam command="load" file="$(find umap)/config/umap_params.yaml" />
+    
+    <!-- Launch main node -->
+    <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
+</launch>

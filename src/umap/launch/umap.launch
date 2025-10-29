@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Load parameters -->
+    <rosparam command="load" file="$(find umap)/config/test_clean.yaml" />
+    
+    <!-- Launch main node -->
+    <node pkg="umap" type="umap_extract" name="umap_node" output="screen">
+        <!-- For sim env -->
+        <remap from="/camera/aligned_depth_to_color/image_raw" to="/d400/aligned_depth_to_color/image_raw" />
+        <remap from="/camera/color/image_raw" to="/d400/color/image_raw" />
+    </node>
+
+    <node pkg="tf2_ros" type="static_transform_publisher" name="d400_color_to_map" args="0 0 0 0 0 0 map d400_color_optical_frame" />
+
+    <!-- Launch RViz for visualization -->
+    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/patrick/cleancode/src/umap/rviz/test_umap.rviz" />
+    
+    <!-- Play rosbag -->
+    <!-- <node pkg="rosbag" type="play" name="rosbag_play" args="/home/patrick/rosbag/2025-04-02-19-05-04.bag" output="log" /> -->
+</launch>

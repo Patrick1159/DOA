@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Launch RViz for visualization -->
+    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/patrick/cleancode/src/umap/rviz/test_umap.rviz" />
+
+    <!-- UMAP -->
+    <!-- Load parameters -->
+    <rosparam command="load" file="$(find umap)/config/test_clean.yaml" />
+    
+    <!-- Launch main node -->
+    <node pkg="umap" type="umap_extract" name="umap_node" output="screen">
+        <remap from="/camera/aligned_depth_to_color/image_raw" to="/d400/aligned_depth_to_color/image_raw" />
+        <remap from="/camera/color/image_raw" to="/d400/color/image_raw" />
+    </node>
+    <node pkg="tf2_ros" type="static_transform_publisher" name="d400_color_to_map" args="0 0 0 0 0 0 map d400_color_optical_frame" />
+
+    <!-- COARSE -->
+    <rosparam command="load" file="$(find umap)/config/test_clean.yaml" />
+    <param name="use_sim_time" value="true" />
+    <node pkg="umap" type="coarse_match" name="coarse_match_tracker" output="screen" />
+
+    <!-- DETAILED -->
+    <rosparam command="load" file="$(find umap)/config/umap_params.yaml" />
+    <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
+
+    <!-- Feature Extractor -->
+    <node pkg="umap" type="feature_extract.py" name="feature_extractor" output="screen">
+        <!-- Image topic parameter -->
+        <param name="image_topic" value="/d400/color/image_raw" />
+    </node>
+
+    <!-- COSTMAP -->
+    <!-- Map to base_link transform -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="map_to_base_link" 
+          args="0 0 0 0 0 0 map base_link" />
+
+    <node name="costmap_generator" pkg="umap" type="costmap_generator" output="screen">
+        <!-- Costmap parameters -->
+        <param name="resolution" value="0.05" />        <!-- 5cm resolution -->
+        <param name="map_width" value="20.0" />         <!-- 20m x 20m map -->
+        <param name="map_height" value="20.0" />
+        <param name="robot_height" value="2.0" />       <!-- Consider obstacles up to 2m -->
+        <param name="obstacle_threshold" value="0.1" /> <!-- Points above 10cm are obstacles -->
+        <param name="free_threshold" value="0.02" />    <!-- Points below 2cm are free space -->
+        
+        <!-- Frame parameters -->
+        <param name="map_frame" value="map" />
+        <param name="pointcloud_frame" value="camera_rgb_optical_frame" />
+        
+        <!-- Topic remapping if needed -->
+        <remap from="/velodyne_points" to="/RED/pointcloud_process/pointcloud" />
+        <remap from="/costmap" to="/move_base/global_costmap/costmap" />
+    </node>
+
+    <!-- tf from map to world -->
+    <node pkg="tf" type="static_transform_publisher" name="map_to_world" args="0 0 0 0 0 0 world map 100" />
+    
+</launch>

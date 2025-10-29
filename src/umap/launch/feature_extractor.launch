@@ -1,0 +1,10 @@
+<launch>
+    <!-- Feature Extractor Node -->
+    <node pkg="umap" type="feature_extract.py" name="feature_extractor" output="screen">
+        <!-- Image topic parameter -->
+        <param name="image_topic" value="/d400/color/image_raw" />
+        
+        <!-- Or use different camera topic -->
+        <!-- <param name="image_topic" value="/d435/color/image_raw" /> -->
+    </node>
+</launch>
