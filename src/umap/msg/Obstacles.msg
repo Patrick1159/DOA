@@ -18,7 +18,7 @@ uint32[] box_height
 
 # mask
 sensor_msgs/Image[] mask # 仅保留box内的部分rgb信息
-sensor_msgs/Image[] binary_mask # list长度为obstacle数。obstacle的所有mask放在一个Image上，尺寸与rgb/depth image相同
+sensor_msgs/Image binary_mask # for pointcloud, only dynamic-obstacles zone is not 0
 
 # Fearture
 std_msgs/Float32MultiArray[] features
