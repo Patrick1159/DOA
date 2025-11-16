@@ -13,9 +13,6 @@ umapProcess::umapProcess() {
     sync_ = std::make_shared<Sync>(SyncPolicy(10), depth_sub_, rgb_sub_);
     sync_->registerCallback(boost::bind(&umapProcess::syncCallback, this, _1, _2));
 
-    // get camera pose
-    camera_pose_sub = nh_.subscribe("/camera/current_pose", 10, &umapProcess::cameraPoseCallback, this);
-
     bbox_2D_pub_ = nh_.advertise<umap::BoundingBoxes2D>("/umap/2D_bounding_boxes", 10);
     u_map_pub_ = nh_.advertise<sensor_msgs::Image>("/umap/u_map", 10);
     rgb_bbox_pub_ = nh_.advertise<sensor_msgs::Image>("/umap/visualization/bbox_rgb_visualization", 10);
@@ -42,29 +39,10 @@ umapProcess::umapProcess() {
 }
 
 
-void umapProcess::cameraPoseCallback(const geometry_msgs::PoseStampedConstPtr& msg) {
-    cam_to_world_ = Eigen::Matrix4d::Identity();
-    Eigen::Matrix3d rotx;
-    rotx << 1, 0, 0,
-            0, 0, 1,
-            0, -1, 0;
-    cam_to_world_.block<3,3>(0,0) = Eigen::Quaterniond(msg->pose.orientation.w, msg->pose.orientation.x, msg->pose.orientation.y, msg->pose.orientation.z).toRotationMatrix()*rotx;
-    
-    
-    
-    cam_to_world_.block<3,1>(0,3) = Eigen::Vector3d(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
-
-    has_pose = true;
-}
 /// @brief Callback function for synchronized depth and RGB images
 /// @param depth_msg 
 /// @param rgb_msg 
 void umapProcess::syncCallback(const sensor_msgs::ImageConstPtr& depth_msg, const sensor_msgs::ImageConstPtr& rgb_msg) {
-    if (!has_pose) {
-        ROS_WARN("No camera pose received yet, skipping frame");
-        return;
-    }
-
     try {
         cv_bridge::CvImagePtr depth_ptr = cv_bridge::toCvCopy(depth_msg, "32FC1");
         cv_bridge::CvImagePtr rgb_ptr = cv_bridge::toCvCopy(rgb_msg, "bgr8");
@@ -401,20 +379,12 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
             depth_in_far /= params_.depth_factor;
             depth_in_near /= params_.depth_factor;
 
-            // 3D box centeroid in camera coordinates
+            // 3D box centeroid
             // (x, y, z)为camera坐标系(右手)下的位置，单位：m
             // x: 水平← 宽，y: 竖直↑ 高，z: 深
-            float cam_x = (bb_U.x + bb_U.width / 2.0 - params_.px) * mid_depth / params_.fx;
-            float cam_y = ((y_up + y_down) / 2.0 - params_.py) * mid_depth / params_.fy;
-            float cam_z = mid_depth;
-
-            // Transform camera coordinates to world coordinates
-            Eigen::Vector4d cam_pos(cam_x, cam_y, cam_z, 1.0);
-            Eigen::Vector4d world_pos = cam_to_world_ * cam_pos;
-
-            curr_box.x = world_pos.x();
-            curr_box.y = world_pos.y();
-            curr_box.z = world_pos.z();
+            curr_box.x = (bb_U.x + bb_U.width / 2.0 - params_.px) * mid_depth / params_.fx;
+            curr_box.y = ((y_up + y_down) / 2.0 - params_.py) * mid_depth / params_.fy;
+            curr_box.z = mid_depth;
 
             // Calculate box dimensions in meters
             curr_box.x_width = std::max(0.1f, bb_U.width * mid_depth / params_.fx); //宽度，保证尺寸不小于0.1*0.1*0.1
@@ -432,7 +402,7 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
     umap::BoundingBoxes3D bbox3D_msg;
 
     bbox3D_msg.header.stamp = stamp; // Use the same timestamp as the input images
-    bbox3D_msg.header.frame_id = "world"; //params_.camera_frame
+    bbox3D_msg.header.frame_id = params_.camera_frame;
     bbox3D_msg.image_width = current_rgb_.cols;
     bbox3D_msg.image_height = current_rgb_.rows;
 
@@ -462,17 +432,17 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
 
     for (size_t i = 0; i<boxes3D.size(); i++) {
         visualization_msgs::Marker marker;
-        marker.header.frame_id = "world"; // Changed from camera frame to world frame
+        marker.header.frame_id = params_.camera_frame;
         marker.header.stamp = ros::Time::now();
         marker.ns = "3D_bounding_boxes";
         marker.id = i;
         marker.type = visualization_msgs::Marker::CUBE;
         marker.action = visualization_msgs::Marker::ADD;
 
-        // Set the position (already in world coordinates)
-        marker.pose.position.x = boxes3D[i].x;
-        marker.pose.position.y = boxes3D[i].y;
-        marker.pose.position.z = boxes3D[i].z;
+        // Set the position and size of the box
+        marker.pose.position.x = boxes3D[i].z;
+        marker.pose.position.y = -boxes3D[i].x;
+        marker.pose.position.z = -boxes3D[i].y;
 
         // Orientation (identity quaternion)
         marker.pose.orientation.w = 1.0;
