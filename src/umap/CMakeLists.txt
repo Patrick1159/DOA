@@ -121,6 +121,9 @@ add_executable(detailed_match
 add_executable(costmap_generator src/costmap_generator.cpp)
 target_link_libraries(costmap_generator ${catkin_LIBRARIES})
 
+# final frame convertion
+add_executable(bbox_frame_converter src/convert_bbox_frame.cpp)
+target_link_libraries(bbox_frame_converter ${catkin_LIBRARIES})
 # Link against our library
 target_link_libraries(umap_extract
     ${PROJECT_NAME}
