@@ -21,6 +21,7 @@ private:
     ros::NodeHandle nh_;
     message_filters::Subscriber<sensor_msgs::Image> depth_sub_;
     message_filters::Subscriber<sensor_msgs::Image> rgb_sub_;
+    ros::Subscriber camera_pose_sub;
 
     ros::Publisher bbox_2D_pub_; // LS + BR + width + height for downflow job (框框数据，自定义信息)
     ros::Publisher rgb_bbox_pub_; // RGB + bboxes (only for visualization)
@@ -41,6 +42,8 @@ private:
     // Load parameters
     umapParams params_;
 
+    Eigen::Matrix4d cam_to_world_;
+    bool has_pose = false;
     // Image DATA
     cv::Mat current_rgb_;
     cv::Mat current_depth_;
@@ -61,7 +64,7 @@ public:
     int current_frame_ = 0;
 
     void syncCallback(const sensor_msgs::ImageConstPtr& depth_msg, const sensor_msgs::ImageConstPtr& rgb_msg); // Synchronized callback
-    // void depthCallback(const sensor_msgs::ImageConstPtr& depth_msg);
+    void cameraPoseCallback(const geometry_msgs::PoseStampedConstPtr& pose_msg);
 
     cv::Mat generateHistogramMatrix(const cv::Mat& depth_val);
 
