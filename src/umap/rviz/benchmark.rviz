@@ -1,0 +1,332 @@
+Panels:
+  - Class: rviz/Displays
+    Help Height: 138
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Global Options1
+        - /Status1
+        - /TrackerText(Coarse)1/Status1
+        - /RoI(Feature)1
+      Splitter Ratio: 0.5
+    Tree Height: 808
+  - Class: rviz/Selection
+    Name: Selection
+  - Class: rviz/Tool Properties
+    Expanded:
+      - /2D Pose Estimate1
+      - /2D Nav Goal1
+      - /Publish Point1
+    Name: Tool Properties
+    Splitter Ratio: 0.5886790156364441
+  - Class: rviz/Views
+    Expanded:
+      - /Current View1
+    Name: Views
+    Splitter Ratio: 0.5
+  - Class: rviz/Time
+    Name: Time
+    SyncMode: 0
+    SyncSource: Depth
+Preferences:
+  PromptSaveOnExit: true
+Toolbars:
+  toolButtonStyle: 2
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.029999999329447746
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 10
+      Reference Frame: <Fixed Frame>
+      Value: true
+    - Alpha: 1
+      Class: rviz/Axes
+      Enabled: true
+      Length: 1
+      Name: d400_color_optical_frame
+      Radius: 0.10000000149011612
+      Reference Frame: d400_color_optical_frame
+      Show Trail: false
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /umap/u_map
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Umap
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /d400/aligned_depth_to_color/image_raw
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Depth
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /d400/color/image_raw
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: RGB
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /umap/visualization/3D_bounding_boxes
+      Name: BoundingBox3D(umap_node)
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+    - Class: rviz/Image
+      Enabled: false
+      Image Topic: /umap/visualization/bbox_rgb_visualization
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: BoundingBox2D(umap_node)
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: false
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /tracker/text_markers
+      Name: TrackerText(Coarse)
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 32; 74; 135
+      Enabled: false
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: TrackPath(Coarse)
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /tracker/obstacle_paths
+      Unreliable: false
+      Value: false
+    - Class: rviz/Image
+      Enabled: false
+      Image Topic: /model_output/visualization/segmented_image
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: BoxPrompt(Feature)
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: false
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /model_output/segmented_image
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: RoI(Feature)
+      Normalize Range: true
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /rematch/visualizationtext_markers
+      Name: TrackedObs(Detailed)
+      Namespaces:
+        tracked_obstacles_text: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /rematch/visualization/tracked_obstacles
+      Name: BoundingBox3D(detailed)
+      Namespaces:
+        matched_obstacles: true
+      Queue Size: 100
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 25; 255; 0
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Lines
+      Line Width: 0.029999999329447746
+      Name: ObstaclePath(detailed)
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /rematch/obstacle_paths
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 255; 255; 255
+      Color Transformer: RGB8
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud2
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.009999999776482582
+      Style: Points
+      Topic: /RED/pointcloud_process/pointcloud
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 0.699999988079071
+      Class: rviz/Map
+      Color Scheme: costmap
+      Draw Behind: false
+      Enabled: true
+      Name: CostMap
+      Topic: /move_base/global_costmap/costmap
+      Unreliable: false
+      Use Timestamp: false
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 0; 43; 54
+    Default Light: true
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+      Hide Inactive Objects: true
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+    - Class: rviz/SetInitialPose
+      Theta std deviation: 0.2617993950843811
+      Topic: /initialpose
+      X std deviation: 0.5
+      Y std deviation: 0.5
+    - Class: rviz/SetGoal
+      Topic: /move_base_simple/goal
+    - Class: rviz/PublishPoint
+      Single click: true
+      Topic: /clicked_point
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 16.25940704345703
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Field of View: 0.7853981852531433
+      Focal Point:
+        X: 1.1212515830993652
+        Y: 0.23837906122207642
+        Z: 0.8104643821716309
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.9447969198226929
+      Target Frame: <Fixed Frame>
+      Yaw: 3.140402317047119
+    Saved: ~
+Window Geometry:
+  BoundingBox2D(umap_node):
+    collapsed: false
+  BoxPrompt(Feature):
+    collapsed: false
+  Depth:
+    collapsed: false
+  Displays:
+    collapsed: false
+  Height: 2176
+  Hide Left Dock: false
+  Hide Right Dock: false
+  QMainWindow State: 000000ff00000000fd00000004000000000000055d0000077afc020000000bfb0000001200530065006c0065006300740069006f006e00000001e10000009b000000b000fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000b0fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000006e000004200000018200fffffffb000000080055006d00610070010000049a000001770000002600fffffffb000000240042006f007800500072006f006d007000740028004600650061007400750072006500290000000242000000ad0000002600fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb000000180052006f0049002800460065006100740075007200650029010000061d000001cb0000002600ffffff000000010000014f0000077afc0200000006fb0000000a00440065007000740068010000006e000003be0000002600fffffffb000000060052004700420100000438000003b00000002600fffffffb000000300042006f0075006e00640069006e00670042006f00780032004400280075006d00610070005f006e006f0064006500290000000287000001100000002600fffffffb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000021b000002ff0000013200fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000a0000000226fc0100000001fb0000000a00560069006500770073030000004e00000080000002e1000001970000000300000f700000005efc0100000002fb0000000800540069006d0065010000000000000f70000006dc00fffffffb0000000800540069006d00650100000000000004500000000000000000000008ac0000077a00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  RGB:
+    collapsed: false
+  RoI(Feature):
+    collapsed: false
+  Selection:
+    collapsed: false
+  Time:
+    collapsed: false
+  Tool Properties:
+    collapsed: false
+  Umap:
+    collapsed: false
+  Views:
+    collapsed: false
+  Width: 3952
+  X: 144
+  Y: 54
