@@ -12,6 +12,7 @@ rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh), clip_ids_()
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualization/tracked_obstacles", 10);
     text_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualizationtext_markers", 10);
     path_pub_ = nh_.advertise<nav_msgs::Path>("rematch/obstacle_paths", 10);
+    tracker_details_pub_ = nh_.advertise<umap::TrackerDetails>("/rematch/tracker_details", 10);
 
     nh_.param("rematch_node/SIMILARITY_THRESHOLD", rematch_params_.SIMILARITY_THRESHOLD, 0.6);
     nh_.param("rematch_node/SIMILARITY_WEIGHT", rematch_params_.SIMILARITY_WEIGHT, 0.5);
@@ -85,6 +86,7 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
     matchAndUpdate(curr_obstacles);
 
     publishVisualization();
+    publishTrackerDetails(ros::Time::now().toSec());
 }
 
 /// @brief Calculate the bounding box for a given centroid and box size.
@@ -427,7 +429,39 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
     for (const auto &mapping : id_mapping_)
         ROS_DEBUG_NAMED("rematch", "  Tracker ID %d -> Measurement ID %d", mapping.first, mapping.second);
 
-    // 5. 更新tracker的生命周期
+    // 5. 打印dynamic tracker数据(history pos, vel)
+    ROS_INFO("========== Dynamic Trackers Analysis ==========");
+    ROS_INFO("Total active trackers: %zu", trackers_.size());
+    
+    for (size_t i = 0; i < trackers_.size(); ++i) {
+        const auto& tracker = trackers_[i];
+        auto state = tracker.getState();
+        
+        ROS_INFO("--- Tracker ID: %d ---", tracker.track_id);
+        ROS_INFO("  Current Position: [%.3f, %.3f, %.3f]", 
+                 state.position.x(), state.position.y(), state.position.z());
+        ROS_INFO("  Current Velocity: [%.3f, %.3f, %.3f] (magnitude: %.3f m/s)", 
+                 state.velocity.x(), state.velocity.y(), state.velocity.z(),
+                 state.velocity.norm());
+        ROS_INFO("  Box Dimensions: [%.3f, %.3f, %.3f]", 
+                 tracker.box_dimensions.x(), tracker.box_dimensions.y(), tracker.box_dimensions.z());
+        ROS_INFO("  Last Update Time: %.3f", tracker.getLastUpdateTime());
+        ROS_INFO("  Age: %.3f seconds", current_time - tracker.getLastUpdateTime());
+        
+        // Print position history if available
+        // Note: You might need to add a method to ObstacleTracker to access position history
+        // For now, we'll show predicted future positions based on current velocity
+        auto future_positions = getNextKFrameState(tracker, 5);
+        ROS_INFO("  Predicted next 5 positions:");
+        for (size_t k = 0; k < future_positions.size(); ++k) {
+            ROS_INFO("    Frame +%zu: [%.3f, %.3f, %.3f]", k+1, 
+                     future_positions[k].x(), future_positions[k].y(), future_positions[k].z());
+        }
+        ROS_INFO("  --------------------------------");
+    }
+    ROS_INFO("===============================================");
+
+    // 6. 更新tracker的生命周期
     updateTrackerLifecycles(trackers_, current_time, rematch_params_.MAX_TRACKER_AGE);
 
 }
@@ -442,4 +476,44 @@ std::vector<Eigen::Vector3d> rematchNode::getNextKFrameState(const onboardDetect
         future_states.push_back(future_position);
     }
     return future_states;
+}
+
+/// @brief Publish tracker details for logging and analysis
+/// @param current_time Current timestamp
+void rematchNode::publishTrackerDetails(double current_time) {
+    umap::TrackerDetails tracker_details_msg;
+    
+    // Set header
+    tracker_details_msg.header.stamp = ros::Time::now();
+    tracker_details_msg.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
+    
+    // Populate tracker data
+    for (const auto& tracker : trackers_) {
+        auto state = tracker.getState();
+        
+        tracker_details_msg.tracker_ids.push_back(tracker.track_id);
+        
+        geometry_msgs::Point position;
+        position.x = state.position.x();
+        position.y = state.position.y();
+        position.z = state.position.z();
+        tracker_details_msg.positions.push_back(position);
+        
+        geometry_msgs::Vector3 velocity;
+        velocity.x = state.velocity.x();
+        velocity.y = state.velocity.y();
+        velocity.z = state.velocity.z();
+        tracker_details_msg.velocities.push_back(velocity);
+        
+        geometry_msgs::Vector3 box_dim;
+        box_dim.x = tracker.box_dimensions.x();
+        box_dim.y = tracker.box_dimensions.y();
+        box_dim.z = tracker.box_dimensions.z();
+        tracker_details_msg.box_dimensions.push_back(box_dim);
+        
+        tracker_details_msg.last_update_times.push_back(tracker.getLastUpdateTime());
+        tracker_details_msg.ages.push_back(current_time - tracker.getLastUpdateTime());
+    }
+    ROS_INFO("Publishing tracker details with %zu entries", tracker_details_msg.tracker_ids.size());
+    tracker_details_pub_.publish(tracker_details_msg);
 }

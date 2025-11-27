@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<launch>
+
+    <arg name="rgb_topic" default="/d400/color/image_raw" />
+    <arg name="aligned_depth_topic" default="/d400/aligned_depth_to_color/image_raw" />
+
+    <!-- Launch RViz for visualization -->
+    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/patrick/DOA/src/umap/rviz/benchmark.rviz" />
+
+    <!-- UMAP -->
+    <!-- Load parameters -->
+    <rosparam command="load" file="$(find umap)/config/exp_param.yaml" />
+    
+    <!-- Launch main node -->
+    <node pkg="umap" type="umap_extract" name="umap_node" output="screen">
+        <remap from="/camera/aligned_depth_to_color/image_raw" to= "$(arg aligned_depth_topic)"/>
+        <remap from="/camera/color/image_raw" to="$(arg rgb_topic)" />
+    </node>
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="d400_color_to_map" args="0 0 0 0 0 0 map d400_color_optical_frame" /> -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="d400_depth_to_map" args="0 0 0 0 0 0 t265_link d400_depth_optical_frame" />
+    
+    <!-- COARSE -->
+    <rosparam command="load" file="$(find umap)/config/exp_param.yaml" />
+    <!-- <param name="use_sim_time" value="true" /> -->
+    <node pkg="umap" type="coarse_match" name="coarse_match_tracker" output="screen" />
+
+    <!-- DETAILED -->
+    <rosparam command="load" file="$(find umap)/config/exp_param.yaml" />
+    <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
+
+    <!-- Feature Extractor -->
+    <node pkg="umap" type="para_samnode.py" name="para_sam_node" output="screen">
+        <param name="image_topic" value="$(arg rgb_topic)" />
+    </node>
+    <node pkg="umap" type="para_clipnode.py" name="para_clip_node" output="screen">
+        <param name="image_topic" value="$(arg rgb_topic)" />
+    </node>
+    <node pkg="umap" type="para_aggregate.py" name="para_aggregate_node" output="screen"/>
+    
+
+    <!-- Pointcloud Generate -->
+
+    <!-- <node pkg="pointcloud_generator" type="camera_pose.py" name="d435_pose" output="screen">
+        <param name="parent_frame_id" value="odom" />
+        <param name="child_frame_id" value="d400_color_optical_frame" />
+    </node> -->
+
+    <node name="camera_node" pkg="pointcloud_generator" type="processor" output="screen">
+        <rosparam file="$(find pointcloud_generator)/param/default_param.yaml" command="load"/>
+        <param name="/camera_node/camera/pointcloud_frame_id" value="odom"/>
+        <param name="/camera_node/pointcloud_generate/dynamic_only" value="true"/>
+
+        <remap from="/RED/pointcloud_process/camera_pose" to="/camera/current_pose"/>
+        <remap from="/RED/pointcloud_process/odom" to="/uav0/mavros/local_position/odom"/>
+        <remap from="/RED/pointcloud_process/color_image" to="$(arg rgb_topic)"/>
+        <remap from="/RED/pointcloud_process/depth_image" to="$(arg aligned_depth_topic)"/>
+        <remap from="/model_output/obstacles" to="/model_output/obstacles"/>
+    </node>
+
+</launch>

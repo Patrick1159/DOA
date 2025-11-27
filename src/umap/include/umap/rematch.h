@@ -4,6 +4,7 @@
 #include <umap/ObstacleTracker.h>
 #include <umap/umapProcess.h>
 #include <umap/umapType.h>
+#include <umap/TrackerDetails.h>
 
 #include <Eigen/Dense>
 #include <vector>
@@ -38,6 +39,7 @@ private:
     ros::Publisher marker_pub_;
     ros::Publisher text_marker_pub_;
     ros::Publisher path_pub_;
+    ros::Publisher tracker_details_pub_;
     
     rematchParams rematch_params_;
 
@@ -64,6 +66,7 @@ private:
     std::vector<Eigen::Vector3d> getNextKFrameState(const onboardDetector::ObstacleTracker& tracker, int K);
     std::vector<std::pair<int, int>> association(Eigen::MatrixXd &cost_matrix);
     void publishVisualization();
+    void publishTrackerDetails(double current_time);
 
     Eigen::MatrixXd getCostMatrix(vector<onboardDetector::ObstacleTracker>& trackers, const vector<ObstacleMeasureFeature>& measurements);
 
