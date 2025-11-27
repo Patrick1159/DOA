@@ -1,0 +1,18 @@
+<launch>
+    <node name="camera_node" pkg="pointcloud_generator" type="processor" output="screen">
+        <rosparam file="$(find pointcloud_generator)/param/sim_param.yaml" command="load"/>
+
+        <!-- <remap from="/RED/pointcloud_process/pointcloud" to="/your_pc_name"/> -->
+        <remap from="/RED/pointcloud_process/camera_pose" to="/camera/current_pose"/>
+        <remap from="/RED/pointcloud_process/odom" to="/uav0/mavros/local_position/odom"/>
+        <remap from="/RED/pointcloud_process/color_image" to="/camera/rgb/image_raw"/>
+        <remap from="/RED/pointcloud_process/depth_image" to="/camera/depth/image_raw"/>
+        <remap from="/model_output/obstacles" to="/model_output/obstacles"/>
+    </node>
+
+    <node name="static_pose_tf" pkg="pointcloud_generator" type="static_pose_tf.py" output="screen">
+        <param name="parent_frame_id" value="base_link" />
+        <param name="child_frame_id" value="camera_rgb_optical_frame" />
+    </node>
+    
+</launch> 

@@ -1,0 +1,18 @@
+# Default parameters for pointcloud generator
+camera:
+  view_field: 4.0       
+  self_filter: 0.25    
+  grid_size: 0.02     
+  eud_range: 0.05         
+  eud_min_points_num: 40  
+
+  pointcloud_frame_id: "odom"
+  fx: 525.0              
+  fy: 525.0             
+  cx: 319.5              
+  cy: 239.5              
+  camera_factor: 1000    
+
+pointcloud_generate:
+  dynamic_only: true # true: only generate dynamic points; false: generate all points
+  segmentation_mode: 1 # 0为box mode; 1为mask mode(SAM); 2为都考虑。使用mode1

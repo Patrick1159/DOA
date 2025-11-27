@@ -1,0 +1,16 @@
+<launch>
+    <node name="camera_node" pkg="pointcloud_generator" type="processor" output="screen">
+        <rosparam file="$(find pointcloud_generator)/param/default_param.yaml" command="load"/>
+        <!-- set pointcloud frame here -->
+        <param name="/camera_node/camera/pointcloud_frame_id" value="world"/>
+
+        <!-- <remap from="/RED/pointcloud_process/pointcloud" to="/your_pc_name"/> -->
+        <remap from="/RED/pointcloud_process/camera_pose" to="/camera/current_pose"/>
+        <remap from="/RED/pointcloud_process/odom" to="/uav0/mavros/local_position/odom"/>
+        <remap from="/RED/pointcloud_process/color_image" to="/d400/color/image_raw"/>
+        <remap from="/RED/pointcloud_process/depth_image" to="/d400/aligned_depth_to_color/image_raw"/>
+        <remap from="/model_output/obstacles" to="/model_output/obstacles"/>
+    </node>
+    <node name="static_transform_publisher" pkg="tf" type="static_transform_publisher" output="screen"
+          args="0 0 0 0 0 0 world odom 100" />
+</launch> 

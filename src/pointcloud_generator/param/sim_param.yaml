@@ -1,0 +1,18 @@
+# Simulation parameters for pointcloud generator
+camera:
+  view_field: 4.0       
+  self_filter: 0.0025    
+  grid_size: 0.05
+  eud_range: 0.01        
+  eud_min_points_num: 1  
+
+
+  fx: 525.0              
+  fy: 525.0             
+  cx: 319.5              
+  cy: 239.5              
+  camera_factor: 1    
+
+pointcloud_generate:
+  dynamic_only: true # true: only generate dynamic points; false: generate all points
+  segmentation_mode: 0 # 0为box mode; 1为mask mode; 2为都考虑。使用，mode0
