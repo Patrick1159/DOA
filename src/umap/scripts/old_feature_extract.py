@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
+#!/home/cius/miniconda3/envs/cius/bin/python3
 
 """
 Feature extraction node for dynamic obstacle tracking.
@@ -28,7 +28,7 @@ import sys
 
 import umap
 
-sys.path.append("/home/patrick/FastSAM/")
+sys.path.append("/home/cius/FastSAM/")
 
 from fastsam import FastSAM, FastSAMPrompt
 from src import segment, funcs
@@ -40,7 +40,7 @@ class Extractor:
         self.bridge = CvBridge()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         rospy.loginfo(f"Using device: {self.device}")
-        self.model = FastSAM('/home/patrick/FastSAM/weights/FastSAM.pt')
+        self.model = FastSAM('/home/cius/FastSAM/weights/FastSAM.pt')
         self.clip_model, self.clip_preprocess = clip.load("ViT-B/32", device="cuda")
         self.frontGround_only = False # 提取ROI的时候只提取前景
         self.BOOSTclip = True

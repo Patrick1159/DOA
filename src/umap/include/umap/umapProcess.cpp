@@ -56,8 +56,8 @@ void umapProcess::syncCallback(const sensor_msgs::ImageConstPtr& depth_msg, cons
         double min_depth, max_depth;
         cv::minMaxLoc(depth_val, &min_depth, &max_depth, nullptr, nullptr, valid_mask);
         
-        ROS_INFO("Depth image stats - Min: %.2f, Max: %.2f, Mean: %.2f", 
-             min_depth, max_depth, cv::mean(depth_val, valid_mask)[0]);
+        // ROS_INFO("Depth image stats - Min: %.2f, Max: %.2f, Mean: %.2f", 
+        //      min_depth, max_depth, cv::mean(depth_val, valid_mask)[0]);
         
         // Apply depth inversion if enabled
         if (params_.inverse_depth) {
@@ -77,7 +77,7 @@ void umapProcess::syncCallback(const sensor_msgs::ImageConstPtr& depth_msg, cons
         current_rgb_ = rgb_img.clone();
 
         // Main Image Process
-        ROS_INFO_STREAM("Processing frame" << current_frame_++);
+        ROS_INFO_STREAM("\033[30;43m[UMAP Module] Processing frame " << current_frame_++ << "\033[0m");
         cv::Mat hist_matrix = generateHistogramMatrix(depth_val);
         // ROS_INFO_STREAM("Histogram matrix size: " << hist_matrix.cols << hist_matrix.rows);
 
@@ -135,7 +135,7 @@ cv::Mat umapProcess::generateHistogramMatrix(const cv::Mat& depth_val){
 
 /// @brief: Apply Gaussian blur to histogram matrix
 void umapProcess::applyGaussianBlur(cv::Mat& hist_matrix){
-    cv::GaussianBlur(hist_matrix, hist_matrix, cv::Size(5, 9), 1.5, 0);
+    cv::GaussianBlur(hist_matrix, hist_matrix, cv::Size(5, 9), 10, 10);
 }
 
 
@@ -313,7 +313,7 @@ void umapProcess::extract_2DboxRGB(const ros::Time& stamp, const cv::Mat& depth_
     sensor_msgs::ImagePtr rgb_msg = cv_bridge::CvImage(std_msgs::Header(), "bgr8", visualization).toImageMsg();
     rgb_msg->header.stamp = stamp;
     rgb_bbox_pub_.publish(rgb_msg);
-    ROS_INFO("RGB image with bounding boxes published");
+    // ROS_INFO("[umap module] RGB image with bounding boxes published");
 
     // publish2DBoxes(bounding_box_HW, stamp, current_rgb_.cols, current_rgb_.rows);
     umap::BoundingBoxes2D HW_box_msg;
@@ -331,8 +331,6 @@ void umapProcess::extract_2DboxRGB(const ros::Time& stamp, const cv::Mat& depth_
     }
 
     bbox_2D_pub_.publish(HW_box_msg);
-    ROS_INFO("2D bounding boxes 框框msg published: %zu", bounding_box_HW.size());
-    
 }
 
 void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val){
@@ -423,9 +421,8 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
 
     }
 
-    // 发布3D边界框消息
     bbox_3D_pub_.publish(bbox3D_msg);
-    ROS_INFO("Published 3D bounding boxes message with %zu boxes", boxes3D.size());
+    // ROS_INFO("[umap module]Published 3D bounding boxes message with %zu boxes", boxes3D.size());
 
     // Publish 3D bounding boxes for Visualization
     visualization_msgs::MarkerArray marker_array;
@@ -466,7 +463,6 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
         marker_array.markers.push_back(marker);
     }
     marker_pub_.publish(marker_array);
-    ROS_INFO("3D bounding boxes published: %zu", boxes3D.size());
 }
 
 
@@ -680,8 +676,8 @@ cv::Mat umapProcess::extractRGBPointsInBox(const cv::Mat& depth_img, const cv::M
     // 获取3D框的深度范围
     float min_depth = box.z - box.z_width/2;
     float max_depth = box.z + box.z_width/2;
-    ROS_INFO("min depth = %f, max depth = %f", min_depth, max_depth);
-    ROS_INFO("box centroid points: %f, %f, %f, \n xyz width: %f, %f, %f \n", box.x, box.y, box.z, box.x_width, box.y_width, box.z_width);
+    // ROS_INFO("min depth = %f, max depth = %f", min_depth, max_depth);
+    // ROS_INFO("box centroid points: %f, %f, %f, \n xyz width: %f, %f, %f \n", box.x, box.y, box.z, box.x_width, box.y_width, box.z_width);
 
     // 创建深度掩码
     for(int v = 0; v < depth_img.rows; v++) {

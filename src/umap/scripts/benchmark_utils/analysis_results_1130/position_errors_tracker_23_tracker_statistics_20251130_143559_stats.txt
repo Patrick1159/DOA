@@ -1,0 +1,15 @@
+Position Error Analysis Statistics
+==================================================
+
+mean_error: 1.749015
+median_error: 1.803516
+std_error: 0.889771
+max_error: 3.233749
+min_error: 0.150110
+rmse: 1.962331
+mean_error_x: 0.737196
+mean_error_y: 1.364723
+mean_error_z: 0.213265
+std_error_x: 0.693115
+std_error_y: 1.041063
+std_error_z: 0.090608

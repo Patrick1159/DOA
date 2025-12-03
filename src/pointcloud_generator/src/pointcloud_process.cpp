@@ -29,8 +29,7 @@ void PointCloudProcessor::color_callback(const sensor_msgs::ImageConstPtr& msg){
 /// @brief Extract corresponding 3D bounding boxes from obstacles message, For segmentation
 /// @param obstacles_msg 
 void PointCloudProcessor::obstacles_callback(const umap::Obstacles &obstacles_msg){
-    ROS_INFO("Received obstacles message with %zu boxes", obstacles_msg.box_ids.size());
-    // TODO: 提取出obstacle对应的范围，然后筛选点云数据，只保留当前3D box中的点云
+    // ROS_INFO("Received obstacles message with %zu boxes", obstacles_msg.box_ids.size());
     std::vector<edge_points> edge_pts;
     for (size_t i = 0; i < obstacles_msg.box_ids.size(); i++) {
         // 1. HW limit
@@ -61,7 +60,7 @@ void PointCloudProcessor::obstacles_callback(const umap::Obstacles &obstacles_ms
         cv::Mat single_mask = mask_ptr->image;
         curr_masks.clear();
         curr_masks.push_back(single_mask);
-        ROS_INFO("Binary mask contains %d non-zero pixels", cv::countNonZero(single_mask));
+        // ROS_INFO("Binary mask contains %d non-zero pixels", cv::countNonZero(single_mask));
     } catch (cv_bridge::Exception& e) {
         ROS_ERROR("Could not convert binary_mask from '%s' to 'mono8'.", obstacles_msg.binary_mask.encoding.c_str());
     }
@@ -176,7 +175,7 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
         raw_pc->height = 1;
         raw_pc->width = raw_pc->points.size();
 
-        ROS_INFO("Total points in raw point cloud: %ld", raw_pc->size());
+        // ROS_INFO("Total points in raw point cloud: %ld", raw_pc->size());
         // 直通滤波
         pcl::PassThrough<pcl::PointXYZRGB> pass_z;
         pass_z.setInputCloud(raw_pc);
@@ -186,7 +185,7 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
         pass_z.filter(*pass_z_pc);
         pass_z_pc->height = 1;
         pass_z_pc->width = pass_z_pc->points.size();
-        ROS_INFO("Points after pass-through filter: %d", pass_z_pc->size());
+        // ROS_INFO("Points after pass-through filter: %d", pass_z_pc->size());
 
         // 体素滤波
         pcl::VoxelGrid<pcl::PointXYZRGB> vox;
@@ -197,7 +196,7 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
         vox_pc->height = 1;
         vox_pc->width = vox_pc->points.size();
         vox_pc->is_dense = false;
-        ROS_INFO("Points after voxel grid filter: %ld", vox_pc->size());
+        // ROS_INFO("Points after voxel grid filter: %ld", vox_pc->size());
 
         // 噪点去除
         pcl::EuclideanClusterExtraction<pcl::PointXYZRGB> euclidean_cluster;
@@ -221,7 +220,7 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
         filtered_pc->width = filtered_pc->points.size();
         filtered_pc->height = 1;
         filtered_pc->is_dense = false;
-        ROS_INFO("Points after euclidean cluster filter: %ld", filtered_pc->size());
+        // ROS_INFO("Points after euclidean cluster filter: %ld", filtered_pc->size());
 
         // 自身滤除
         pcl::CropBox<pcl::PointXYZRGB> crop_box_filter;
@@ -233,7 +232,7 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
         crop_box_filter.setNegative(true); 
         pcl::PointCloud<pcl::PointXYZRGB>::Ptr filtered_self_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
         crop_box_filter.filter(*filtered_self_pc);
-        ROS_INFO("Points after self cluster filter: %ld", filtered_self_pc->size());
+        // ROS_INFO("Points after self cluster filter: %ld", filtered_self_pc->size());
 
         global_pc.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
         
@@ -245,8 +244,7 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
         pc_msg.header.frame_id = pointcloud_frame_id;
         pc_msg.header.stamp = ros::Time::now();
         pc_pub.publish(pc_msg);
-        ROS_INFO("Published point cloud with frame_id: %s", pc_msg.header.frame_id.c_str());
-        ROS_INFO("Published point cloud with %ld points", global_pc->size());
+        // ROS_INFO("Published point cloud with %ld points", global_pc->size());
     }
     catch (cv_bridge::Exception& e)
     {

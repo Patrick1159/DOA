@@ -115,8 +115,8 @@ visualization_msgs::Marker rematchNode::createObstacleMarker(
     
     // Add bounding box if measurement data is available
     if (measurement_id < static_cast<int>(curr_sizes_.size())) {
-        float width = curr_sizes_[measurement_id][1];
-        float height = curr_sizes_[measurement_id][0];
+        float width = curr_sizes_[measurement_id][0];
+        float height = curr_sizes_[measurement_id][1];
         float depth = curr_sizes_[measurement_id][2];
         
         auto corners = createBoundingBoxCorners(width, height, depth);
@@ -175,7 +175,7 @@ visualization_msgs::Marker rematchNode::createTextMarker(
 
 // Helper function: Update tracker path
 void rematchNode::updateTrackerPath(
-    int tracker_idx,
+    int tracker_id,
     const geometry_msgs::Point& position,
     const std_msgs::Header& header) {
     
@@ -184,34 +184,42 @@ void rematchNode::updateTrackerPath(
     pose.pose.position = position;
     
     // Initialize path if it doesn't exist
-    if (tracker_paths_.find(tracker_idx) == tracker_paths_.end()) {
-        tracker_paths_[tracker_idx] = std::vector<geometry_msgs::PoseStamped>();
+    if (tracker_paths_.find(tracker_id) == tracker_paths_.end()) {
+        tracker_paths_[tracker_id] = std::vector<geometry_msgs::PoseStamped>();
+        ROS_DEBUG_NAMED("visualization", "[Path] Initializing new path for tracker ID: %d", tracker_id);
     }
     
     // Add new pose to path
-    tracker_paths_[tracker_idx].push_back(pose);
+    tracker_paths_[tracker_id].push_back(pose);
     
-    // Maintain maximum path length (fixed bug: was using tracker_id instead of tracker_idx)
-    if (tracker_paths_[tracker_idx].size() > max_path_length_) {
-        tracker_paths_[tracker_idx].erase(tracker_paths_[tracker_idx].begin());
+    // Maintain maximum path length
+    if (tracker_paths_[tracker_id].size() > max_path_length_) {
+        tracker_paths_[tracker_id].erase(tracker_paths_[tracker_id].begin());
     }
+    
+    ROS_DEBUG_NAMED("visualization", "[Path] Updated path for tracker ID %d, path length: %zu, position: [%.3f, %.3f, %.3f]", 
+                    tracker_id, tracker_paths_[tracker_id].size(), position.x, position.y, position.z);
 }
 
 // Helper function: Publish tracker path
 void rematchNode::publishTrackerPath(
-    int tracker_idx,
+    int tracker_id,
     const ros::Time& timestamp) {
     
-    if (tracker_paths_.find(tracker_idx) == tracker_paths_.end()) {
+    if (tracker_paths_.find(tracker_id) == tracker_paths_.end()) {
+        ROS_DEBUG_NAMED("visualization", "[Path] No path found for tracker ID: %d", tracker_id);
         return;
     }
     
     nav_msgs::Path path;
     path.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
     path.header.stamp = timestamp;
-    path.poses = tracker_paths_[tracker_idx];
+    path.poses = tracker_paths_[tracker_id];
     
     path_pub_.publish(path);
+    
+    ROS_INFO("[Path] Published path for tracker ID %d with %zu poses on topic: %s", 
+             tracker_id, path.poses.size(), path_pub_.getTopic().c_str());
 }
 
 // Helper function: Delete markers for removed trackers
@@ -245,7 +253,9 @@ void rematchNode::deleteRemovedTrackerMarkers(
 // Helper function: Clean up stale tracker paths
 void rematchNode::cleanupStalePaths() {
     for (auto it = tracker_paths_.begin(); it != tracker_paths_.end();) {
-        if (id_mapping_.find(it->first) == id_mapping_.end()) {
+        int tracker_id = it->first;
+        if (id_mapping_.find(tracker_id) == id_mapping_.end()) {
+            ROS_DEBUG_NAMED("visualization", "[Path] Cleaning up stale path for tracker ID: %d", tracker_id);
             it = tracker_paths_.erase(it);
         } else {
             ++it;
@@ -286,8 +296,11 @@ void rematchNode::publishVisualization()
         text_marker_array.markers.push_back(text_marker);
         
         // Update and publish tracker path
-        updateTrackerPath(tracker_idx, marker.pose.position, marker.header);
-        publishTrackerPath(tracker_idx, current_time);
+        updateTrackerPath(tracker_id, marker.pose.position, marker.header);
+        publishTrackerPath(tracker_id, current_time);
+        
+        ROS_DEBUG_NAMED("visualization", "[Visualization] Processing tracker ID %d (idx %d) at position [%.3f, %.3f, %.3f]",
+                       tracker_id, tracker_idx, marker.pose.position.x, marker.pose.position.y, marker.pose.position.z);
     }
 
     // Handle empty marker array case

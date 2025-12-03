@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
+#!/home/cius/miniconda3/envs/DOA/bin/python3
 """
 Subscribe CLIP and SAM messages, publish full /model_output/obstacles message.
 
@@ -55,7 +55,7 @@ class ParaMsgAggregator:
         )
 
     def pose_callback(self, msg: PoseStamped):
-        """Process camera pose and compute cam_to_world transformation matrix"""
+        """Subcribe camera pose topic and compute cam_to_world transformation matrix"""
         self.cam_to_world = np.eye(4)
         rotx = np.array([
             [1, 0, 0],
@@ -80,7 +80,7 @@ class ParaMsgAggregator:
         self.has_pose = True
         
         # rospy.loginfo_throttle(1.0, "Updated camera pose transformation matrix")
-        rospy.loginfo(f"Camera to World Transformation Matrix:\n{self.cam_to_world}")
+        # rospy.loginfo(f"Camera to World Transformation Matrix:\n{self.cam_to_world}")
 
     def _synced_callback(self, sam_msg: Obstacles, clip_msg: Obstacles):
         """Callback when SAM and CLIP messages are time-synchronized"""

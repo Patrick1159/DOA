@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
+#!/home/cius/miniconda3/envs/DOA/bin/python3
 """
 Subscribes to dynamic obstacles and image topics, processes ROIs, and publishes results.
 """
@@ -75,14 +75,14 @@ class PrarSamNode:
 
     def _process_dynamic_obstacles(self, obstacles_msg):
         """Process dynamic obstacles and extract features"""
-        rospy.loginfo("Processing dynamic obstacles")
+        # rospy.loginfo("Processing dynamic obstacles")
         
         if self.current_image is None:
             rospy.logwarn("No current image available")
             return
         
         if not obstacles_msg.box_ids:
-            rospy.logwarn("No bounding boxes received")
+            # rospy.logwarn("No bounding boxes received")
             return
         
         try:
@@ -140,45 +140,49 @@ class PrarSamNode:
                 # Optional SAM processing
                 if self.config.RUN_SAM:
                     sam_masks = self._process_with_sam(roi, box_id, processing_stats)
-                    binary_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
+                else:
+                    # create an all-ones mask for the ROI (1, H, W)
+                    sam_masks = torch.ones((1, roi.shape[0], roi.shape[1]), dtype=torch.uint8)
 
-                    # Transform SAM masks from ROI coordinate system to original image coordinate system
-                    if sam_masks.shape[0] > 0:
-                        # Get ROI bounding box in original image coordinates
-                        box_x = obstacles_msg.box_x[i]
-                        box_y = obstacles_msg.box_y[i]
-                        box_width = obstacles_msg.box_width[i]
-                        box_height = obstacles_msg.box_height[i]
-                        
-                        # Transform each mask from ROI to image coordinates
-                        transformed_masks = []
-                        for mask_idx in range(sam_masks.shape[0]):
-                            roi_mask = sam_masks[mask_idx].cpu().numpy()
-                            image_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
-                            resized_mask = cv2.resize(roi_mask.astype(np.uint8), 
-                                                        (box_width, box_height),
-                                                        interpolation=cv2.INTER_NEAREST)
-                            image_mask[box_y:box_y + box_height, 
-                                        box_x:box_x + box_width] = resized_mask
-                            transformed_masks.append(image_mask)
-                        
-                        # Overlay masks on current image
-                        overlay_image = self.current_image.copy()
-                        for mask_idx, transformed_mask in enumerate(transformed_masks):
-                            color = self.color_generator.get_color(mask_idx)
-                            colored_mask = np.zeros_like(overlay_image)
-                            colored_mask[transformed_mask > 0] = color
-                            binary_mask = np.maximum(binary_mask, transformed_mask)
+                binary_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
 
-                            # Blend with original image
-                            overlay_image = cv2.addWeighted(overlay_image, 0.7, colored_mask, 0.3, 0)
+                # Transform SAM masks from ROI coordinate system to original image coordinate system
+                if sam_masks.shape[0] > 0:
+                    # Get ROI bounding box in original image coordinates
+                    box_x = obstacles_msg.box_x[i]
+                    box_y = obstacles_msg.box_y[i]
+                    box_width = obstacles_msg.box_width[i]
+                    box_height = obstacles_msg.box_height[i]
+                    
+                    # Transform each mask from ROI to image coordinates
+                    transformed_masks = []
+                    for mask_idx in range(sam_masks.shape[0]):
+                        roi_mask = sam_masks[mask_idx].cpu().numpy()
+                        image_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
+                        resized_mask = cv2.resize(roi_mask.astype(np.uint8), 
+                                                    (box_width, box_height),
+                                                    interpolation=cv2.INTER_NEAREST)
+                        image_mask[box_y:box_y + box_height, 
+                                    box_x:box_x + box_width] = resized_mask
+                        transformed_masks.append(image_mask)
+                    
+                    # Overlay masks on current image
+                    overlay_image = self.current_image.copy()
+                    for mask_idx, transformed_mask in enumerate(transformed_masks):
+                        color = self.color_generator.get_color(mask_idx)
+                        colored_mask = np.zeros_like(overlay_image)
+                        colored_mask[transformed_mask > 0] = color
+                        binary_mask = np.maximum(binary_mask, transformed_mask)
 
-                        # Publish segmented image
-                        segmented_msg = self.bridge.cv2_to_imgmsg(overlay_image, "bgr8")
-                        segmented_msg.header.stamp = rospy.Time.now()
-                        self.segmented_image_pub.publish(segmented_msg)
-                        rospy.loginfo(f"Non 0 zones in binary mask for box_id {box_id}: {np.count_nonzero(binary_mask)}")
-                        rospy.logdebug(f"Transformed {len(transformed_masks)} masks to image coordinates for box_id {box_id}")
+                        # Blend with original image
+                        overlay_image = cv2.addWeighted(overlay_image, 0.7, colored_mask, 0.3, 0)
+
+                    # Publish segmented image
+                    segmented_msg = self.bridge.cv2_to_imgmsg(overlay_image, "bgr8")
+                    segmented_msg.header.stamp = rospy.Time.now()
+                    self.segmented_image_pub.publish(segmented_msg)
+                    # rospy.loginfo(f"Non 0 zones in binary mask for box_id {box_id}: {np.count_nonzero(binary_mask)}")
+                    rospy.logdebug(f"Transformed {len(transformed_masks)} masks to image coordinates for box_id {box_id}")
 
             except Exception as e:
                 rospy.logerr(f"Feature extraction failed for box_id {box_id}: {e}")
@@ -199,13 +203,14 @@ class PrarSamNode:
             results = self.model_manager.run_fastsam(roi)
             sam_time = time.time() - sam_start_time
             processing_stats['sam_time'] += sam_time
-            rospy.logdebug(f"SAM processing for box_id {box_id}: {sam_time:.3f}s")
+            rospy.loginfo(f"SAM processing for box_id {box_id}: {sam_time:.3f}s")
             
             # Process SAM results
             masks = results[0].masks.data  # (N, H, W) tensor
             num_masks = masks.shape[0]
             rospy.loginfo(f"SAM found {num_masks} masks for box_id {box_id}")
             return masks
+            
         except Exception as e:
             rospy.logerr(f"SAM processing failed for box_id {box_id}: {e}")
             return torch.empty((0, 0, 0))
@@ -297,8 +302,6 @@ class PrarSamNode:
             
             # Log processing statistics
             rospy.loginfo(
-                f"Published results: {len(features)} features, "
-                f"CLIP: {processing_stats['clip_time']:.3f}s, "
                 f"SAM: {processing_stats['sam_time']:.3f}s"
             )
             

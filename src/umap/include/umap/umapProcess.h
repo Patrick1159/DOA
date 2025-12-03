@@ -61,7 +61,6 @@ public:
     int current_frame_ = 0;
 
     void syncCallback(const sensor_msgs::ImageConstPtr& depth_msg, const sensor_msgs::ImageConstPtr& rgb_msg); // Synchronized callback
-    // void depthCallback(const sensor_msgs::ImageConstPtr& depth_msg);
 
     cv::Mat generateHistogramMatrix(const cv::Mat& depth_val);
 

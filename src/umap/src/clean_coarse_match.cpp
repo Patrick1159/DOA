@@ -38,6 +38,7 @@ trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh) {
     nh_.param("tracker_node/MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE", params_.MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE, 3); // control the length of status
     nh_.param("tracker_node/MAX_TRACKER_AGE", params_.MAX_TRACKER_AGE, 1.0); // seconds
     nh_.param("tracker_node/UNMATCHED_PUBLISH_TIMEOUT", params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5); // seconds, independent of MAX_TRACKER_AGE
+    nh_.param("tracker_node/EXPANSION_RATE", params_.EXPANSION_RATE, 0.3); // per second dimension expansion rate for dynamic trackers
 
     // Visualization param
     nh_.param("tracker_node/COARSE_VIS_FRAME", params_.COARSE_VIS_FRAME, std::string("camera_color_optical_frame"));
@@ -63,13 +64,13 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
         Eigen::Vector3d measurement, size;
         measurement << boxes3D_msg.x[i], boxes3D_msg.y[i], boxes3D_msg.z[i];
         measurements.push_back(measurement);
-
+        
         size << boxes3D_msg.width[i], boxes3D_msg.height[i], boxes3D_msg.thickness[i]; // width, height, thickness
         sizes.push_back(size);
 
         sensor_msgs::Image mask = boxes3D_msg.mask[i];
         masks.push_back(mask);
-        ROS_DEBUG_NAMED("Coarse tracker", "[MSG convert] Extracted mask for box ID: %d", boxes3D_msg.box_ids[i]);
+        ROS_INFO_STREAM("[Coarse tracker] Box " << i << "position: [" << measurement.transpose() << "], size: [" << size.transpose() << "]");   
     }
 
     curr_measurements_ = measurements;
@@ -305,6 +306,13 @@ Eigen::MatrixXd trackerNode::getCost_matrix(vector<onboardDetector::ObstacleTrac
                 }
 
                 // Calculate intersection volume
+                // ROS_INFO_STREAM("\033[37m[Coarse IOU] Tracker " << i << " vs Detection " << j << "\033[0m");
+                // ROS_INFO_STREAM("  Tracker bounds: X[" << tracker_bounds[0].first << ", " << tracker_bounds[0].second << "], "
+                                // << "Y[" << tracker_bounds[1].first << ", " << tracker_bounds[1].second << "], "
+                                // << "Z[" << tracker_bounds[2].first << ", " << tracker_bounds[2].second << "]");
+                // ROS_INFO_STREAM("  Detection bounds: X[" << detection_bounds[0].first << ", " << detection_bounds[0].second << "], "
+                                // << "Y[" << detection_bounds[1].first << ", " << detection_bounds[1].second << "], "
+                                // << "Z[" << detection_bounds[2].first << ", " << detection_bounds[2].second << "]");
                 double intersection_volume = 1.0;
                 bool has_overlap = true;
                 for (int k = 0; k < 3; ++k) {
@@ -338,17 +346,17 @@ Eigen::MatrixXd trackerNode::getCost_matrix(vector<onboardDetector::ObstacleTrac
                 if (iou < iou_threshold) {
                     iou_cost = 999999.0;
                     invalid_match_mapping_[i].push_back(j); // 记录无效匹配(tracker_idx, detection_idx)
-                    ROS_DEBUG_NAMED("Coarse tracker", "Invalid match: T[%d] vs D[%d] - IoU: %.3f < threshold: %.3f", i, j, iou, iou_threshold);
+                    // ROS_INFO("[Coarse tracker] Invalid match: T[%d] vs D[%d] - IoU: %.3f < threshold: %.3f", i, j, iou, iou_threshold);
                 }else if (distance > dist_threshold) {
                     iou_cost = 999999.0;
                     invalid_match_mapping_[i].push_back(j);
-                    ROS_DEBUG_NAMED("Coarse tracker", "Invalid match: T[%d] vs D[%d] - Distance: %.3f > threshold: %.3f", i, j, distance, dist_threshold);
+                    // ROS_INFO("[Coarse tracker] Invalid match: T[%d] vs D[%d] - Distance: %.3f > threshold: %.3f", i, j, distance, dist_threshold);
                 }
 
                 cost_matrix(i, j) = iou_weight * iou_cost + dist_weight * distance;
 
-                ROS_DEBUG_NAMED("Coarse tracker", "T[%d] vs D[%d]: dist=%.3f cost=%.3f iou=%.3f", 
-                    i, j, (center_of_tracker - center_of_detection).norm(), cost_matrix(i, j), iou);
+                // ROS_INFO("[Coarse tracker] T[%d] vs D[%d]: dist=%.3f cost=%.3f iou=%.3f", 
+                //     i, j, (center_of_tracker - center_of_detection).norm(), cost_matrix(i, j), iou);
             }
         }
         
@@ -465,14 +473,14 @@ std::vector<std::pair<int, int>> trackerNode::association(const Eigen::MatrixXd&
     }
 
     // Debug output for result_matrix
-    // ROS_INFO("Adjusted Result Matrix after Invalid check:");
-    // for (size_t i = 0; i < result_matrix.rows(); ++i) {
-        // std::stringstream row_stream;
-        // for (size_t j = 0; j < result_matrix.cols(); ++j) {
-            // row_stream << result_matrix(i, j) << " ";
-        // }
+    // ROS_INFO("\033[34m[Coarse Match] Adjusted Result Matrix after Invalid check:\033[0m");
+    for (size_t i = 0; i < result_matrix.rows(); ++i) {
+        std::stringstream row_stream;
+        for (size_t j = 0; j < result_matrix.cols(); ++j) {
+            row_stream << result_matrix(i, j) << " ";
+        }
         // ROS_INFO("%s", row_stream.str().c_str());
-    // }
+    }
 
     std::vector<std::pair<int, int>> assignments; // to return
     std::vector<bool> tracker_matched(cost_matrix.rows(), false);
@@ -550,9 +558,9 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
     // Perform data association
     auto matched_pairs = association(cost_matrix); // 这个matched_pairs是trackers_的索引与measurements的索引的对应关系
     // Output matched pairs
-    ROS_ERROR_NAMED("Coarse tracker", "Matched Pairs:");
+    ROS_INFO("[Coarse tracker] Matched Pairs:");
     for (const auto& match : matched_pairs) {
-        ROS_ERROR_NAMED("Coarse tracker", "Tracker idx %d matched with Detection idx %d", match.first, match.second);
+        ROS_INFO("Tracker idx %d matched with Detection idx %d", match.first, match.second);
     }
     ROS_DEBUG_NAMED("Coarse tracker", "Current measurement num: %ld", measurements.size());
 
@@ -591,7 +599,6 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
     // Handle unmatched detections
     std::vector<int> unmatched = findUnmatchedDetections(matched_pairs, measurements.size());
     for (int idx : unmatched) {
-        ROS_DEBUG_STREAM_NAMED("Coarse tracker", "Creating new tracker for unmatched detection " << idx);
         onboardDetector::ObstacleTracker new_tracker;
         std::string uuid = umap::generate_uuid();
         new_tracker.init(measurements[idx], bbox_sizes[idx], current_time, nextAvailableTrackerId, uuid);
@@ -600,7 +607,8 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
         
         // Add new mapping
         id_mapping_[nextAvailableTrackerId] = idx;
-        ROS_DEBUG_NAMED("Coarse tracker", "This tracker id is : %d ", nextAvailableTrackerId);
+        ROS_INFO_STREAM("[Coarse tracker]" << "Creating new tracker for unmatched detection " << idx 
+            << " with tracker id: " << nextAvailableTrackerId);
 
         // Initialize last observed caches for the new tracker
         if (idx < curr_masks_.size()) {
@@ -634,7 +642,12 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
                 // Update dynamic status and then predict
                 (void)isDynamicTracker(trackers_[i]);
                 if (trackers_[i].isDynamic) {
-                    trackers_[i].predictOnly();
+                    // Use dimension expansion prediction for dynamic trackers
+                    trackers_[i].predictOnlyWithDimensionExpansion(current_time, params_.EXPANSION_RATE); // 30% expansion per second
+                    
+                    ROS_DEBUG_NAMED("Coarse tracker", "[Dimension Expansion] Tracker ID %d: time_since_update=%.3fs, dimensions=[%.3f, %.3f, %.3f]", 
+                                   trackers_[i].track_id, time_since_update, 
+                                   trackers_[i].box_dimensions.x(), trackers_[i].box_dimensions.y(), trackers_[i].box_dimensions.z());
                 }
             }
         }

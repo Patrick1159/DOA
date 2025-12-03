@@ -35,6 +35,7 @@ struct trackerParams{
     int SUSTAINED_VELOCITY_COUNT; // number of frames to check sustained velocity
     double MAX_TRACKER_AGE; // seconds, max age of a tracker without updates
     double UNMATCHED_PUBLISH_TIMEOUT; // seconds, how long to keep publishing unmatched dynamic trackers
+    double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
     
     std::string COARSE_VIS_FRAME = "camera_color_optical_frame"; // default frame id
     double AVERAGE_DEPLACEMENT_THRESHOLD; // m threshold for average displacement of a tracker

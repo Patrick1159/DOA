@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
+#!/home/cius/miniconda3/envs/DOA/bin/python3
 """
 CLIP process node, for parallel processing of images using FastSAM.
 """
@@ -66,14 +66,14 @@ class ParaClipNode:
     
     def _process_dynamic_obstacles(self, obstacles_msg):
         """Process dynamic obstacles and extract features"""
-        rospy.loginfo("Processing dynamic obstacles")
+        # rospy.loginfo("Processing dynamic obstacles")
         
         if self.current_image is None:
             rospy.logwarn("No current image available")
             return
         
         if not obstacles_msg.box_ids:
-            rospy.logwarn("No bounding boxes received")
+            # rospy.logwarn("No bounding boxes received")
             return
         
         try:
@@ -120,10 +120,14 @@ class ParaClipNode:
                     continue
                 
                 # Extract CLIP features
-                clip_start_time = time.time()
-                roi_features = self.model_manager.extract_clip_features(
-                    roi, boost=self.config.BOOST_CLIP)
-                clip_time = time.time() - clip_start_time
+                if self.config.RUN_CLIP:
+                    clip_start_time = time.time()
+                    roi_features = self.model_manager.extract_clip_features(
+                        roi, boost=self.config.BOOST_CLIP)
+                    clip_time = time.time() - clip_start_time
+                else:
+                    roi_features = np.array([0])  # Dummy feature
+                    clip_time = 0.0
                 
                 if roi_features is not None:
                     features.append(roi_features)
@@ -179,8 +183,7 @@ class ParaClipNode:
             # Log processing statistics
             rospy.loginfo(
                 f"Published results: {len(features)} features, "
-                f"CLIP: {processing_stats['clip_time']:.3f}s, "
-                f"SAM: {processing_stats['sam_time']:.3f}s"
+                f"CLIP: {processing_stats['clip_time']:.3f}s"
             )
             
         except Exception as e:
@@ -224,6 +227,7 @@ def update_params(ExtractorConfig):
     ExtractorConfig.FOREGROUND_ONLY = rospy.get_param('~foreground_only', ExtractorConfig.FOREGROUND_ONLY)
     ExtractorConfig.BOOST_CLIP = rospy.get_param('~boost_clip', ExtractorConfig.BOOST_CLIP)
     ExtractorConfig.RUN_SAM = rospy.get_param('~run_sam', ExtractorConfig.RUN_SAM)
+    ExtractorConfig.RUN_CLIP = rospy.get_param('~run_clip', ExtractorConfig.RUN_CLIP)
     ExtractorConfig.SAM_CONFIDENCE = rospy.get_param('~sam_confidence', ExtractorConfig.SAM_CONFIDENCE)
     ExtractorConfig.SAM_IOU = rospy.get_param('~sam_iou', ExtractorConfig.SAM_IOU)
     ExtractorConfig.SAM_IMAGE_SIZE = rospy.get_param('~sam_image_size', ExtractorConfig.SAM_IMAGE_SIZE)

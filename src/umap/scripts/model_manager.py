@@ -7,7 +7,7 @@ import sys
 from config_manager import ExtractorConfig
 import numpy as np
 
-sys.path.append("/home/patrick/FastSAM/")
+sys.path.append("/home/cius/FastSAM/")
 from fastsam import FastSAM, FastSAMPrompt
 
 class ModelManager:

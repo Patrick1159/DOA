@@ -79,6 +79,7 @@ void ObstacleTracker::init(const Eigen::Vector3d& initial_pos, const Eigen::Vect
 
     lastUpdateTime = timestamp;
     box_dimensions = bounding_box_size; // initialize bounding box size
+    original_box_dimensions = bounding_box_size; // store original dimensions
     history_pos.push_back(initial_pos); // Store position history
     history_vel.push_back(Eigen::Vector3d::Zero()); // Initialize velocity history
     isDynamic = true; // Initialize as dynamic
@@ -95,6 +96,7 @@ void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const 
 
     obcstacleClipFeatures = feature; // initialize clip feature
     box_dimensions = bounding_box_size; // initialize bounding box size
+    original_box_dimensions = bounding_box_size; // store original dimensions
     lastUpdateTime = timestamp;
     history_pos.push_back(initial_pos);
     initialized = true;
@@ -180,6 +182,7 @@ void ObstacleTracker::updateWithFeature(const Eigen::Vector3d& measurement, cons
 
     // TODO: 更新bounding box size！这是一切错误匹配的根源
     box_dimensions << dimensions.x(), dimensions.y(), dimensions.z(); // width, height, thickness
+    original_box_dimensions = box_dimensions; // update original dimensions when observing
 
     update_count++;
 }
@@ -191,6 +194,34 @@ void ObstacleTracker::predictOnly() {
     updateStateTransitionMatrix();
     Eigen::MatrixXd u = Eigen::MatrixXd::Zero(1, 1); // No control input
     kf.predict(u);
+    // Note: lastUpdateTime is intentionally not changed here; it reflects last observation time.
+    // History arrays are not updated for prediction-only steps to keep them as observation history.
+}
+
+void ObstacleTracker::predictOnlyWithDimensionExpansion(double current_time, double expansion_rate) {
+    if (!initialized) return;
+
+    updateStateTransitionMatrix();
+    Eigen::MatrixXd u = Eigen::MatrixXd::Zero(1, 1); // No control input
+    kf.predict(u);
+    
+    // Calculate time since last observation
+    double time_since_update = current_time - lastUpdateTime;
+    
+    // Expand bounding box dimensions based on time elapsed
+    if (time_since_update > 0.0) {
+        // Linear expansion: new_dimension = original + expansion_rate * time_elapsed
+        Eigen::Vector3d expansion = original_box_dimensions * expansion_rate * time_since_update;
+        box_dimensions = original_box_dimensions + expansion;
+        
+        // Ensure minimum dimensions (prevent negative or zero dimensions)
+        box_dimensions = box_dimensions.cwiseMax(original_box_dimensions);
+        
+        // Optional: Set maximum expansion limit (e.g., 3x original size)
+        Eigen::Vector3d max_dimensions = original_box_dimensions * 3.0;
+        box_dimensions = box_dimensions.cwiseMin(max_dimensions);
+    }
+    
     // Note: lastUpdateTime is intentionally not changed here; it reflects last observation time.
     // History arrays are not updated for prediction-only steps to keep them as observation history.
 }

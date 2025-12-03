@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
     <!-- Launch RViz for visualization -->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/patrick/DOA/src/umap/rviz/test_umap.rviz" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/cius/DOA/src/umap/rviz/test_umap.rviz" />
 
     <!-- UMAP -->
     <!-- Load parameters -->

@@ -77,8 +77,8 @@ private:
     double calculateAverageMovement(const std::vector<Eigen::Vector3d>& history) const;
     visualization_msgs::Marker createObstacleMarker(int tracker_id, int tracker_idx, int measurement_id, const ros::Time& timestamp) const;
     visualization_msgs::Marker createTextMarker(int tracker_id, int tracker_idx, const geometry_msgs::Point& position, const ros::Time& timestamp) const;
-    void updateTrackerPath(int tracker_idx, const geometry_msgs::Point& position, const std_msgs::Header& header);
-    void publishTrackerPath(int tracker_idx, const ros::Time& timestamp);
+    void updateTrackerPath(int tracker_id, const geometry_msgs::Point& position, const std_msgs::Header& header);
+    void publishTrackerPath(int tracker_id, const ros::Time& timestamp);
     void deleteRemovedTrackerMarkers(const std::set<int>& current_tracker_ids, visualization_msgs::MarkerArray& marker_array, visualization_msgs::MarkerArray& text_marker_array, const ros::Time& timestamp);
     void cleanupStalePaths();
 };

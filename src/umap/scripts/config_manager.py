@@ -6,14 +6,16 @@ class ExtractorConfig:
 
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     # Model paths
-    FASTSAM_WEIGHTS_PATH = '/home/patrick/FastSAM/weights/FastSAM.pt'
+    FASTSAM_WEIGHTS_PATH = '/home/cius/FastSAM/weights/FastSAM.pt'
     CLIP_MODEL_NAME = "ViT-B/32"
     
     # Processing parameters
     FOREGROUND_ONLY = False
     BOOST_CLIP = True
-    RUN_SAM = True
+    RUN_SAM =True
+    RUN_CLIP = True
     ENABLE_MASK_DEBUG = True  # Enable mask debug visualization
+    PARALLEL = True
     
     # SAM parameters
     SAM_CONFIDENCE = 0.5

@@ -36,8 +36,8 @@ namespace onboardDetector{
         this->states = this->A * this->states + this->B * u;
         this->P = this->A * this->P * this->A.transpose() + this->Q;
 
-        cout << "prediction: " << endl;
-        cout << this->states << endl;
+        // cout << "prediction: " << endl;
+        // cout << this->states << endl;
 
         // update
         MatrixXd S = this->R + this->H * this->P * this->H.transpose(); // innovation matrix
