@@ -38,7 +38,7 @@ public:
     void update(const Eigen::Vector3d& measurement, const Eigen::Vector3d& dimensions, double timestamp, int history_size = 10);
     void updateWithFeature(const Eigen::Vector3d& measurement, const Eigen::Vector3d& dimensions, std::vector<float> feature, double timestamp, int history_size = 10);
     // Predict state when no measurement is available (does not change lastUpdateTime)
-    void predictOnly();
+    void predictOnly(double current_time = 0.0);
     // Predict state with dimension expansion based on time since last update
     void predictOnlyWithDimensionExpansion(double current_time, double expansion_rate = 0.1);
     Obstacle getState() const; // Obstacle struct is {id + pos + vel + timestamp}, state of a tracker is the obstacle that represented

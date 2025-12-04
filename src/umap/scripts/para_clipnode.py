@@ -126,7 +126,7 @@ class ParaClipNode:
                         roi, boost=self.config.BOOST_CLIP)
                     clip_time = time.time() - clip_start_time
                 else:
-                    roi_features = np.array([0])  # Dummy feature
+                    roi_features = np.array([1, 1 ,1])  # Dummy feature
                     clip_time = 0.0
                 
                 if roi_features is not None:

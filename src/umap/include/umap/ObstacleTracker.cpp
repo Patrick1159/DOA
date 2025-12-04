@@ -21,6 +21,7 @@
  */
 
 #include "ObstacleTracker.h"
+#include <ros/ros.h>
 
 namespace onboardDetector {
 
@@ -110,6 +111,16 @@ void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const 
 void ObstacleTracker::update(const Eigen::Vector3d& measurement, const Eigen::Vector3d& dimensions, double timestamp, int history_size) {   
     if (!initialized) return;
 
+    // Calculate actual time step
+    double actual_dt = timestamp - lastUpdateTime;
+    if (actual_dt > 0.0 && actual_dt < 1.0) { // Reasonable time step bounds (max 1 second)
+        dt = actual_dt;
+    } else if (actual_dt <= 0.0) {
+        dt = 0.033; // Default ~30fps
+    } else {
+        dt = 0.1; // Fallback for large gaps
+    }
+    
     updateStateTransitionMatrix();
 
     Eigen::MatrixXd z(3, 1); // Measurement vector
@@ -146,6 +157,20 @@ void ObstacleTracker::update(const Eigen::Vector3d& measurement, const Eigen::Ve
 void ObstacleTracker::updateWithFeature(const Eigen::Vector3d& measurement, const Eigen::Vector3d& dimensions, const std::vector<float> feature, double timestamp, int history_size) {
     if (!initialized) return;
 
+    // Calculate actual time step
+    double actual_dt = timestamp - lastUpdateTime;
+    if (actual_dt > 0.0 && actual_dt < 1.0) { // Reasonable time step bounds (max 1 second)
+        dt = actual_dt;
+    } else if (actual_dt <= 0.0) {
+        dt = 0.033; // Default ~30fps
+    } else {
+        dt = 0.1; // Fallback for large gaps
+    }
+    
+    // Debug output for time step calculation
+    ROS_DEBUG_NAMED("tracker_velocity", "[Tracker %d] Time step: actual_dt=%.6f, used_dt=%.6f, lastUpdate=%.6f, current=%.6f", 
+                    track_id, actual_dt, dt, lastUpdateTime, timestamp);
+    
     updateStateTransitionMatrix();
 
     Eigen::MatrixXd z(3, 1); // Measurement vector
@@ -188,9 +213,17 @@ void ObstacleTracker::updateWithFeature(const Eigen::Vector3d& measurement, cons
 }
 
 
-void ObstacleTracker::predictOnly() {
+void ObstacleTracker::predictOnly(double current_time) {
     if (!initialized) return;
 
+    // Calculate actual time step for prediction
+    double actual_dt = current_time - lastUpdateTime;
+    if (actual_dt > 0.0 && actual_dt < 1.0) {
+        dt = actual_dt;
+    } else {
+        dt = 0.1; // Fallback
+    }
+    
     updateStateTransitionMatrix();
     Eigen::MatrixXd u = Eigen::MatrixXd::Zero(1, 1); // No control input
     kf.predict(u);
