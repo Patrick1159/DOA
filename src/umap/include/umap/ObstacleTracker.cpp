@@ -25,7 +25,7 @@
 
 namespace onboardDetector {
 
-ObstacleTracker::ObstacleTracker() : initialized(false), dt(0.1), track_id(0), lastUpdateTime(0.0) {}
+ObstacleTracker::ObstacleTracker() : initialized(false), dt(0.1), track_id(0), lastUpdateTime(0.0), was_dimension_expanded(false) {}
 
 void ObstacleTracker::initializeKalmanFilter() {
     const int state_size = 6;  // [x, y, z, vx, vy, vz]
@@ -84,6 +84,7 @@ void ObstacleTracker::init(const Eigen::Vector3d& initial_pos, const Eigen::Vect
     history_pos.push_back(initial_pos); // Store position history
     history_vel.push_back(Eigen::Vector3d::Zero()); // Initialize velocity history
     isDynamic = true; // Initialize as dynamic
+    was_dimension_expanded = false; // Initialize dimension expansion flag
     initialized = true;
 }
 
@@ -99,7 +100,10 @@ void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const 
     box_dimensions = bounding_box_size; // initialize bounding box size
     original_box_dimensions = bounding_box_size; // store original dimensions
     lastUpdateTime = timestamp;
-    history_pos.push_back(initial_pos);
+    history_pos.push_back(initial_pos); // Store position history
+    history_vel.push_back(Eigen::Vector3d::Zero()); // Initialize velocity history
+    isDynamic = true; // Initialize as dynamic
+    was_dimension_expanded = false; // Initialize dimension expansion flag
     initialized = true;
     update_count = 1; // Initialize update count
 }

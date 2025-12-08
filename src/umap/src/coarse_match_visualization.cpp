@@ -261,6 +261,9 @@ void trackerNode::publishVisualization() {
             obstacles_msg.box_width.push_back(curr_boxes2D_raw_.width[measurement_id]); // width
             obstacles_msg.box_height.push_back(curr_boxes2D_raw_.height[measurement_id]); // height
 
+            // Set observed field - true for matched trackers (they have current measurements)
+            obstacles_msg.observed.push_back(true);
+
             // add obstacles path to obstacles_msg
             nav_msgs::Path his_path;
             his_path.header.frame_id = kFrameId;
@@ -328,6 +331,9 @@ void trackerNode::publishVisualization() {
             obstacles_msg.box_y.push_back(b2d[1]);
             obstacles_msg.box_width.push_back(b2d[2]);
             obstacles_msg.box_height.push_back(b2d[3]);
+
+            // Set observed field - false for unmatched trackers that used dimension expansion
+            obstacles_msg.observed.push_back(!tracker.was_dimension_expanded);
 
             // add obstacles path to obstacles_msg (use existing history_pos)
             nav_msgs::Path his_path;

@@ -27,7 +27,7 @@ tracker_node:
   iou_weight: 0.7
   dist_weight: 0.3
 
-  UNMATCHED_PUBLISH_TIMEOUT: 0.0 # seconds, how long to keep publishing unmatched dynamic trackers
+  UNMATCHED_PUBLISH_TIMEOUT: 0.5 # seconds, how long to keep publishing unmatched dynamic trackers
   EXPANSION_RATE: 0.5 # per second dimension expansion rate for dynamic trackers
   MAX_TRACKER_AGE: 1.0 # seconds, max age of a tracker without updates
   # params for determination of dynamic obstacles
@@ -47,13 +47,15 @@ tracker_node:
   COARSE_VIS_FRAME: "d400_depth_optical_frame"
 
 rematch_node:
-  SIMILARITY_THRESHOLD: 0.3
-  SIMILARITY_WEIGHT: 0.8
+  SIMILARITY_THRESHOLD: 0.5
+  SIMILARITY_WEIGHT: 1.0
 
-  IOU_THRESHOLD: 0.1
-  IOU_WEIGHT: 0.2
+  IOU_THRESHOLD: -1.0 # set to negative to disable IOU filtering
+  IOU_WEIGHT: 0.0
   
-  VELOCITY_DIFF_THRESHOLD: 2.0
-  VELOCITY_DIFF_WEIGHT: 0.0
-  MAX_TRACKER_AGE : 0.0 # seconds, max age of a tracker without updates
+  DISTANCE_THRESHOLD: 1.5
+  DISTANCE_WEIGHT: 0.5
+  MAX_TRACKER_AGE : 10.0 # seconds, max age of a tracker without updates
+  UNMATCHED_PUBLISH_TIMEOUT: 2.5 # seconds, how long to keep publishing unmatched trackers
+  EXPANSION_RATE: 100.0 # per second dimension expansion rate for dynamic trackers
   REMATCH_VIS_FRAME: "d400_depth_optical_frame"

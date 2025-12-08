@@ -25,3 +25,6 @@ std_msgs/Float32MultiArray[] features
 
 # History trajectory
 nav_msgs/Path[] obstacles_history_pos
+
+# observed
+bool[] observed

@@ -18,10 +18,12 @@ rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh)
     nh_.param("rematch_node/SIMILARITY_WEIGHT", rematch_params_.SIMILARITY_WEIGHT, 0.5);
     nh_.param("rematch_node/IOU_THRESHOLD", rematch_params_.IOU_THRESHOLD, 0.5);
     nh_.param("rematch_node/IOU_WEIGHT", rematch_params_.IOU_WEIGHT, 0.5);
-    nh_.param("rematch_node/VELOCITY_DIFF_THRESHOLD", rematch_params_.VELOCITY_DIFF_THRESHOLD, 0.1);
-    nh_.param("rematch_node/VELOCITY_DIFF_WEIGHT", rematch_params_.VELOCITY_DIFF_WEIGHT, 0.5);
+    nh_.param("rematch_node/DISTANCE_THRESHOLD", rematch_params_.DISTANCE_THRESHOLD, 0.1);
+    nh_.param("rematch_node/DISTANCE_WEIGHT", rematch_params_.DISTANCE_WEIGHT, 0.5);
     nh_.param("rematch_node/REMATCH_VIS_FRAME", rematch_params_.REMATCH_VIS_FRAME, std::string("camera_color_optical_frame"));
     nh_.param("rematch_node/MAX_TRACKER_AGE", rematch_params_.MAX_TRACKER_AGE, 0.0);
+    nh_.param("rematch_node/UNMATCHED_PUBLISH_TIMEOUT", rematch_params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5);
+    nh_.param("rematch_node/EXPANSION_RATE", rematch_params_.EXPANSION_RATE, 0.3);
 
     global_tracker_id_ = 0; // Initialize global tracker ID
     ROS_INFO("Rematch node initialized.");
@@ -121,7 +123,8 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
     double IOU_THRESHOLD = rematch_params_.IOU_THRESHOLD;
     double IOU_WEIGHT = rematch_params_.IOU_WEIGHT;
 
-    double VELOCITY_DIFF_THRESHOLD = rematch_params_.VELOCITY_DIFF_THRESHOLD;
+    double DISTANCE_THRESHOLD = rematch_params_.DISTANCE_THRESHOLD;
+    double DISTANCE_WEIGHT = rematch_params_.DISTANCE_WEIGHT;
 
     ROS_INFO("=== Match Evaluation Start ===");
     for (size_t i = 0; i < n_trackers; ++i)
@@ -130,7 +133,7 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
         {
             // TODO: 加入自适应更改cost function的权重: 若lastUpdateTime距现在太久，则降低iou权重，加大特征的权重
 
-            // 1. IoU cost
+            // 1. IoU / distance cost
             Eigen::Vector3d center_box = trackers[i].getState().position;
             Eigen::Vector3d center_detection = measurements[j].centroid_measurement;
             Eigen::Vector3d size_tracker = trackers[i].box_dimensions;
@@ -138,6 +141,7 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
 
             // Calculate IoU between tracker and detection bounding boxes
             double iou = 0.0;
+            double distance = (center_box - center_detection).norm();
 
             // Calculate 3D boundaries for tracker and detection
             std::array<std::pair<double, double>, 3> tracker_bounds, detection_bounds;
@@ -180,25 +184,34 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
             double cosine_similarity = dot_product / (norm1 * norm2);
 
             bool iou_valid = iou > IOU_THRESHOLD;
+            bool distance_valid = distance < DISTANCE_THRESHOLD;
+            if (IOU_THRESHOLD < 0.0) // disable iou check
+                iou_valid = true;
+
             bool feature_match = cosine_similarity > SIMILARITY_THRESHOLD;
 
             ROS_INFO_NAMED("Rematch", "Track %zu <-> Det %zu: iou=%.3f sim=%.3f, ", i, j, iou, cosine_similarity);
 
-            if (!feature_match || !iou_valid){
+            if (!feature_match || !iou_valid || !distance_valid){
                 cost_matrix(i, j) = 999999.0;
                 invalid_match_mapping_[i].push_back(j); // 记录无效匹配(tracker_idx, detection_idx)
                 ROS_DEBUG_NAMED("Rematch", "Invalid match: T[%ld] vs D[%ld] - IoU: %.3f < threshold: %.3f", i, j, iou, IOU_THRESHOLD);
                 if (!iou_valid)
-                    ROS_DEBUG_NAMED("Rematch", "  [NO MATCH] Low IoU");
+                    ROS_INFO("Rematch  [NO MATCH] Low IoU");
+                if (!distance_valid)
+                    ROS_INFO("Rematch  [NO MATCH] Large distance");
                 if (!feature_match)
-                    ROS_DEBUG_NAMED("Rematch", "  [NO MATCH] Low feature similarity");
+                    ROS_INFO("Rematch  [NO MATCH] Low feature similarity");
             }
             else{
                 double iou_cost = 1.0 - iou;
                 double similarity_cost = 1.0 - cosine_similarity;
+                double distance_cost = distance;
+
                 cost_matrix(i, j) = SIMILARITY_WEIGHT * similarity_cost 
-                                  + IOU_WEIGHT * iou_cost;
-                ROS_INFO_NAMED("Rematch", "\033[1;32m  [MATCH SUCCESS] Tracker %zu <-> Detection %zu: IoU=%.3f, Similarity=%.3f, Cost=%.6f\033[0m",
+                                  + IOU_WEIGHT * iou_cost
+                                  + DISTANCE_WEIGHT * distance_cost;
+                ROS_INFO_NAMED("Rematch", "\033[1;32m  [MATCH SUCCESS] Tracker %zu <-> Detection %zu: IoU=%.3f, Similarity=%.3f, Distance=%.3f, Cost=%.6f\033[0m",
                          i, j, iou, cosine_similarity, cost_matrix(i, j));
             }
         }
@@ -400,6 +413,7 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
 
         if (tracker_idx < trackers_.size() && measurement_idx < curr_obstacles.size()) {
             trackers_[tracker_idx].updateWithFeature(curr_obstacles[measurement_idx].centroid_measurement, curr_obstacles[measurement_idx].dimension,curr_obstacles[measurement_idx].feature, current_time);
+            trackers_[tracker_idx].was_dimension_expanded = false; // Reset flag when getting new measurements
             ROS_DEBUG_NAMED("rematch", "Updating tracker %d with boxSize %f\t%f\t%f", tracker_idx, trackers_[tracker_idx].box_dimensions.x(), trackers_[tracker_idx].box_dimensions.y(), trackers_[tracker_idx].box_dimensions.z()); 
             // id_mapping_[tracker_idx] = measurement_idx;
             int tracker_id = trackers_[tracker_idx].track_id;
@@ -422,7 +436,7 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
         trackers_.push_back(new_tracker);
         
         id_mapping_[global_tracker_id_] = idx;
-        ROS_ERROR("[Detailed] Created new tracker with ID : %ld ", global_tracker_id_);
+        ROS_INFO_STREAM("\033[1;32m[Detailed] Created new tracker with ID : " << global_tracker_id_ << "\033[0m");
         global_tracker_id_++;
         
     }
@@ -435,35 +449,59 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
     ROS_INFO("========== Dynamic Trackers Analysis ==========");
     ROS_INFO("Total active trackers: %zu", trackers_.size());
     
-    // for (size_t i = 0; i < trackers_.size(); ++i) {
-    //     const auto& tracker = trackers_[i];
-    //     auto state = tracker.getState();
+    for (size_t i = 0; i < trackers_.size(); ++i) {
+        const auto& tracker = trackers_[i];
+        auto state = tracker.getState();
         
-    //     ROS_INFO("--- Tracker ID: %d ---", tracker.track_id);
-    //     ROS_INFO("  Current Position: [%.3f, %.3f, %.3f]", 
-    //              state.position.x(), state.position.y(), state.position.z());
-    //     ROS_INFO("  Current Velocity: [%.3f, %.3f, %.3f] (magnitude: %.3f m/s)", 
-    //              state.velocity.x(), state.velocity.y(), state.velocity.z(),
-    //              state.velocity.norm());
-    //     ROS_INFO("  Box Dimensions: [%.3f, %.3f, %.3f]", 
-    //              tracker.box_dimensions.x(), tracker.box_dimensions.y(), tracker.box_dimensions.z());
-    //     ROS_INFO("  Last Update Time: %.3f", tracker.getLastUpdateTime());
-    //     ROS_INFO("  Age: %.3f seconds", current_time - tracker.getLastUpdateTime());
+        ROS_INFO("--- Tracker ID: %d ---", tracker.track_id);
+        ROS_INFO("  Current Position: [%.3f, %.3f, %.3f]", 
+                 state.position.x(), state.position.y(), state.position.z());
+        ROS_INFO("  Current Velocity: [%.3f, %.3f, %.3f] (magnitude: %.3f m/s)", 
+                 state.velocity.x(), state.velocity.y(), state.velocity.z(),
+                 state.velocity.norm());
+        ROS_INFO("  Box Dimensions: [%.3f, %.3f, %.3f]", 
+                 tracker.box_dimensions.x(), tracker.box_dimensions.y(), tracker.box_dimensions.z());
+        ROS_INFO("  Last Update Time: %.3f", tracker.getLastUpdateTime());
+        ROS_INFO("  Age: %.3f seconds", current_time - tracker.getLastUpdateTime());
         
-    //     // Print position history if available
-    //     // Note: You might need to add a method to ObstacleTracker to access position history
-    //     // For now, we'll show predicted future positions based on current velocity
-    //     auto future_positions = getNextKFrameState(tracker, 5);
-    //     ROS_INFO("  Predicted next 5 positions:");
-    //     for (size_t k = 0; k < future_positions.size(); ++k) {
-    //         ROS_INFO("    Frame +%zu: [%.3f, %.3f, %.3f]", k+1, 
-    //                  future_positions[k].x(), future_positions[k].y(), future_positions[k].z());
-    //     }
-    //     ROS_INFO("  --------------------------------");
-    // }
-    // ROS_INFO("===============================================");
+        // Print position history if available
+        // Note: You might need to add a method to ObstacleTracker to access position history
+        // For now, we'll show predicted future positions based on current velocity
+        auto future_positions = getNextKFrameState(tracker, 5);
+        ROS_INFO("  Predicted next 5 positions:");
+        for (size_t k = 0; k < future_positions.size(); ++k) {
+            ROS_INFO("    Frame +%zu: [%.3f, %.3f, %.3f]", k+1, 
+                     future_positions[k].x(), future_positions[k].y(), future_positions[k].z());
+        }
+        ROS_INFO("  --------------------------------");
+    }
+    ROS_INFO("===============================================");
 
-    // 6. 更新tracker的生命周期
+    // 6. Predict for unmatched dynamic trackers so their KF state is up-to-date
+    if (!trackers_.empty()) {
+        std::vector<bool> is_tracker_matched(trackers_.size(), false);
+        for (const auto& match : matched_pairs) {
+            if (match.first >= 0 && match.first < static_cast<int>(trackers_.size())) {
+                is_tracker_matched[match.first] = true;
+            }
+        }
+        for (size_t i = 0; i < trackers_.size(); ++i) {
+            if (is_tracker_matched[i]) continue;
+            // Only continue prediction/publishing for trackers that haven't timed out
+            double time_since_update = current_time - trackers_[i].getLastUpdateTime();
+            if (time_since_update <= rematch_params_.UNMATCHED_PUBLISH_TIMEOUT) {
+                // Use dimension expansion prediction for dynamic trackers
+                trackers_[i].predictOnlyWithDimensionExpansion(current_time, rematch_params_.EXPANSION_RATE);
+                trackers_[i].was_dimension_expanded = true; // Mark as dimension expanded
+                
+                ROS_DEBUG_NAMED("Detailed rematch", "[Dimension Expansion] Tracker ID %d: time_since_update=%.3fs, dimensions=[%.3f, %.3f, %.3f]", 
+                               trackers_[i].track_id, time_since_update, 
+                               trackers_[i].box_dimensions.x(), trackers_[i].box_dimensions.y(), trackers_[i].box_dimensions.z());
+            }
+        }
+    }
+
+    // 7. 更新tracker的生命周期
     updateTrackerLifecycles(trackers_, current_time, rematch_params_.MAX_TRACKER_AGE);
 
 }

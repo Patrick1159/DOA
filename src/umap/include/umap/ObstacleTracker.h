@@ -58,6 +58,7 @@ public:
     Eigen::Vector3d box_dimensions; // Dimensions of the 3D box (width, height, thickness)
     Eigen::Vector3d original_box_dimensions; // Original dimensions when last observed
     int update_count; // Number of updates received
+    bool was_dimension_expanded; // Flag to track if tracker was updated with dimension expansion
 };
 
 }  // namespace onboardDetector

@@ -572,6 +572,7 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
         if (tracker_idx < trackers_.size() && measurement_idx < measurements.size()) {
             // Update tracker with new measurement
             trackers_[tracker_idx].update(measurements[measurement_idx],bbox_sizes[measurement_idx], current_time, params_.HISTORY_SIZE);
+            trackers_[tracker_idx].was_dimension_expanded = false; // Reset flag when getting new measurements
             // Update mapping: use tracker_id (not tracker_idx) to be consistent with initialization
             int tracker_id = trackers_[tracker_idx].track_id;
             id_mapping_[tracker_id] = measurement_idx;
@@ -644,6 +645,7 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
                 if (trackers_[i].isDynamic) {
                     // Use dimension expansion prediction for dynamic trackers
                     trackers_[i].predictOnlyWithDimensionExpansion(current_time, params_.EXPANSION_RATE); // 30% expansion per second
+                    trackers_[i].was_dimension_expanded = true; // Mark as dimension expanded
                     
                     ROS_DEBUG_NAMED("Coarse tracker", "[Dimension Expansion] Tracker ID %d: time_since_update=%.3fs, dimensions=[%.3f, %.3f, %.3f]", 
                                    trackers_[i].track_id, time_since_update, 

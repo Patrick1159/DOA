@@ -91,7 +91,7 @@ class ParaMsgAggregator:
             for attr in [
                 'box_ids', 'centroid_x', 'centroid_y', 'centroid_z',
                 'thickness', 'height', 'width', 'box_x', 'box_y',
-                'box_width', 'box_height'
+                'box_width', 'box_height', 'observed'
             ]:
                 setattr(aggregated_msg, attr, getattr(sam_msg, attr))
             

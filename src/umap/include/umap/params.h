@@ -50,17 +50,13 @@ struct rematchParams{
 
     double DISTANCE_THRESHOLD;
     double DISTANCE_WEIGHT;
-    double SIGMA; // distance cost的高斯核，加入iou后没啥用
-    
-    double SIZE_DIFF_THRESHOLD;
-    double SIZE_DIFF_WEIGHT;
 
     double IOU_THRESHOLD;
     double IOU_WEIGHT; // TODO: 在rematch中订阅yaml的参数更新
-    
-    double VELOCITY_DIFF_THRESHOLD;
-    double VELOCITY_DIFF_WEIGHT;
+
     double MAX_TRACKER_AGE; // seconds, max age of a tracker without updates
+    double UNMATCHED_PUBLISH_TIMEOUT; // seconds, how long to keep publishing unmatched trackers
+    double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
 
     std::string REMATCH_VIS_FRAME = "camera_color_optical_frame";
 };
