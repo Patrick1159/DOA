@@ -20,7 +20,9 @@ class ExtractorConfig:
     # SAM parameters
     SAM_CONFIDENCE = 0.5
     SAM_IOU = 0.8
-    SAM_IMAGE_SIZE = 128
+    SAM_IMAGE_SIZE = 64
+    SAM_BATCH_SIZE = 12  # Batch inference - adjust based on GPU memory (2-8 recommended)
+    SAM_ENABLE_BATCH = True  # Enable batch processing for FastSAM
     
     # ROI parameters
     MAX_ROI_SIZE = 200

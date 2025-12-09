@@ -28,8 +28,9 @@ class ImageProcessor:
             mask_roi = mask[min_y:max_y+1, min_x:max_x+1]
             
             if remove_background:
-                result_roi = np.zeros_like(roi)
-                result_roi[mask_roi > 0] = roi[mask_roi > 0]
+                # **OPTIMIZATION**: Direct masked copy, avoid full zeros array
+                result_roi = roi.copy()  # Copy first to avoid modifying original
+                result_roi[mask_roi == 0] = 0  # Clear background
             else:
                 result_roi = roi
             
@@ -102,74 +103,64 @@ class ImageProcessor:
             return None
     
     def create_mask_visualization(self, original_image, masks, box_ids, boxes):
-        """Create a debug visualization showing all masks"""
+        """Create a debug visualization showing all masks (vectorized)"""
         try:
-            # Create a copy of the original image for overlay
-            mask_vis = original_image.copy()
             height, width = original_image.shape[:2]
             
-            # Create a separate image showing only masks
+            # Pre-allocate output images
+            mask_vis = original_image.copy()
             mask_only = np.zeros((height, width, 3), dtype=np.uint8)
             
-            # Color generator for different masks
+            # Color palette for different masks
             colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), 
                      (255, 0, 255), (0, 255, 255), (128, 0, 128), (255, 165, 0),
                      (0, 128, 128), (128, 128, 0)]
             
+            alpha = 0.3
+            
+            # Process all masks in single pass (vectorized)
             for i, (mask, box_id) in enumerate(zip(masks, box_ids)):
                 if mask is None or mask.size == 0:
                     continue
-                    
+                
                 color = colors[i % len(colors)]
+                mask_bool = mask > 0
                 
-                # Create colored mask overlay with transparency
-                colored_mask = np.zeros_like(original_image)
-                colored_mask[mask > 0] = color
+                # Vectorized blending: only apply to masked regions
+                mask_vis[mask_bool] = cv2.addWeighted(
+                    mask_vis[mask_bool].astype(np.float32),
+                    1.0 - alpha,
+                    np.full_like(mask_vis[mask_bool], color, dtype=np.float32),
+                    alpha, 0
+                ).astype(np.uint8)
                 
-                # Apply mask to mask-only visualization
-                mask_only[mask > 0] = color
+                mask_only[mask_bool] = color
                 
-                # Blend with original image (30% opacity)
-                alpha = 0.3
-                mask_vis = cv2.addWeighted(mask_vis, 1.0, colored_mask, alpha, 0)
-                
-                # Draw bounding box if available
+                # Draw box and labels if available
                 if i < len(boxes):
                     box_x, box_y, box_width, box_height = boxes[i]
-                    cv2.rectangle(mask_vis, 
-                                 (box_x, box_y), 
-                                 (box_x + box_width, box_y + box_height), 
-                                 color, 2)
-                    cv2.rectangle(mask_only, 
-                                 (box_x, box_y), 
-                                 (box_x + box_width, box_y + box_height), 
-                                 color, 2)
+                    cv2.rectangle(mask_vis, (box_x, box_y),
+                                 (box_x + box_width, box_y + box_height), color, 2)
+                    cv2.rectangle(mask_only, (box_x, box_y),
+                                 (box_x + box_width, box_y + box_height), color, 2)
                     
-                    # Add ID label
-                    cv2.putText(mask_vis, f"ID:{box_id}", 
-                               (box_x, box_y - 5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 
-                               self.config.FONT_SCALE, 
-                               color, 
-                               self.config.FONT_THICKNESS)
-                    cv2.putText(mask_only, f"ID:{box_id}", 
-                               (box_x, box_y - 5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 
-                               self.config.FONT_SCALE, 
-                               color, 
-                               self.config.FONT_THICKNESS)
+                    cv2.putText(mask_vis, f"ID:{box_id}", (box_x, box_y - 5),
+                               cv2.FONT_HERSHEY_SIMPLEX, self.config.FONT_SCALE,
+                               color, self.config.FONT_THICKNESS)
+                    cv2.putText(mask_only, f"ID:{box_id}", (box_x, box_y - 5),
+                               cv2.FONT_HERSHEY_SIMPLEX, self.config.FONT_SCALE,
+                               color, self.config.FONT_THICKNESS)
             
-            # Create side-by-side visualization
+            # Combine visualizations (single hstack)
             combined_vis = np.hstack([mask_vis, mask_only])
             
-            # Add title text
+            # Add title
             text_height = 30
             title_img = np.zeros((text_height, combined_vis.shape[1], 3), dtype=np.uint8)
-            cv2.putText(title_img, "Mask Debug: Original+Overlay | Masks Only", 
+            cv2.putText(title_img, "Mask Debug: Original+Overlay | Masks Only",
                        (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
             
             final_vis = np.vstack([title_img, combined_vis])
-            
             rospy.logdebug(f"Created mask visualization with {len(masks)} masks")
             return final_vis
             

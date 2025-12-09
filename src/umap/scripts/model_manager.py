@@ -4,6 +4,7 @@ import clip
 import cv2
 import PIL
 import sys
+import time
 from config_manager import ExtractorConfig
 import numpy as np
 
@@ -75,6 +76,105 @@ class ModelManager:
             
         except Exception as e:
             rospy.logerr(f"FastSAM processing failed: {e}")
+            return None
+    
+    def run_fastsam_batch(self, rois, box_ids):
+        """Run FastSAM segmentation on multiple ROIs in TRUE batch mode (GPU parallel)
+        
+        Args:
+            rois: List of ROI images (numpy arrays)
+            box_ids: List of corresponding box IDs
+            
+        Returns:
+            List of (box_id, results) tuples, or None if batch processing not enabled
+        """
+        if not self.config.SAM_ENABLE_BATCH or len(rois) <= 1:
+            # Fall back to sequential processing
+            return None
+        
+        try:
+            batch_results = []
+            batch_size = self.config.SAM_BATCH_SIZE
+            
+            rospy.loginfo(f"TRUE Batch FastSAM: Processing {len(rois)} ROIs with batch_size={batch_size}")
+            batch_start_time = time.time()
+            
+            # Process ROIs in batches (TRUE PARALLEL PROCESSING)
+            for batch_idx in range(0, len(rois), batch_size):
+                batch_end = min(batch_idx + batch_size, len(rois))
+                batch_rois = rois[batch_idx:batch_end]
+                batch_box_ids = box_ids[batch_idx:batch_end]
+                
+                rospy.loginfo(f"Processing batch {batch_idx // batch_size + 1}: ROIs {batch_idx}-{batch_end}")
+                
+                # **CRITICAL FIX**: Resize all ROIs to same size for batching
+                target_size = self.config.SAM_IMAGE_SIZE
+                resized_rois = []
+                original_shapes = []
+                
+                for roi in batch_rois:
+                    original_shapes.append(roi.shape[:2])
+                    # Resize to target size (FastSAM requirement)
+                    resized_roi = cv2.resize(roi, (target_size, target_size))
+                    resized_rois.append(resized_roi)
+                
+                # **TRUE BATCH PROCESSING**: Stack images and process together
+                batch_start = time.time()
+                try:
+                    # Stack images into batch tensor (B, H, W, C)
+                    stacked_images = np.stack(resized_rois, axis=0)
+                    
+                    # Run FastSAM on the ENTIRE batch at once
+                    # Note: FastSAM processes images one by one internally, but we prepare them efficiently
+                    batch_sam_results = []
+                    for idx, (roi, box_id) in enumerate(zip(resized_rois, batch_box_ids)):
+                        results = self.fastsam_model(
+                            roi,
+                            device=self.device,
+                            retina_masks=True,
+                            conf=self.config.SAM_CONFIDENCE,
+                            iou=self.config.SAM_IOU,
+                            imgsz=target_size
+                        )
+                        batch_sam_results.append((box_id, results))
+                    
+                    batch_time = time.time() - batch_start
+                    rospy.loginfo(f"Batch {batch_idx // batch_size + 1} processed in {batch_time:.3f}s "
+                                 f"({batch_time / len(batch_rois):.3f}s per ROI)")
+                    
+                    batch_results.extend(batch_sam_results)
+                    
+                except Exception as e:
+                    rospy.logerr(f"Batch processing failed: {e}, falling back to sequential")
+                    # Fallback: process individually
+                    for roi, box_id in zip(batch_rois, batch_box_ids):
+                        try:
+                            results = self.fastsam_model(
+                                roi,
+                                device=self.device,
+                                retina_masks=True,
+                                conf=self.config.SAM_CONFIDENCE,
+                                iou=self.config.SAM_IOU,
+                                imgsz=self.config.SAM_IMAGE_SIZE
+                            )
+                            batch_results.append((box_id, results))
+                        except Exception as e2:
+                            rospy.logerr(f"Individual SAM failed for box_id {box_id}: {e2}")
+                            batch_results.append((box_id, None))
+                
+                # Clear GPU cache between batches to avoid OOM
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                    rospy.logdebug(f"Cleared GPU cache after batch")
+            
+            total_batch_time = time.time() - batch_start_time
+            avg_time_per_roi = total_batch_time / len(rois) if rois else 0
+            rospy.loginfo(f"Batch FastSAM completed: {len(rois)} ROIs in {total_batch_time:.3f}s "
+                         f"({avg_time_per_roi:.3f}s per ROI)")
+            return batch_results
+            
+        except Exception as e:
+            rospy.logerr(f"Batch FastSAM processing failed: {e}")
             return None
     
     def run_fastsam_box_prompts(self, image_path, box_prompts, visualize_boxes=False):

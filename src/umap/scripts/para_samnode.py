@@ -86,8 +86,8 @@ class PrarSamNode:
             return
         
         try:
-            # Extract features from all ROIs
-            extracted_features, valid_rois, masks, processing_stats, binary_mask = self._extract_features_from_obstacles(
+            # Extract features from all ROIs (returns overlay_image)
+            extracted_features, valid_rois, masks, processing_stats, binary_mask, overlay_image = self._extract_features_from_obstacles(
                 obstacles_msg)
             
             # Create visualizations
@@ -101,13 +101,13 @@ class PrarSamNode:
             # Publish all results
             self._publish_results(obstacles_msg=obstacles_msg, features=extracted_features, 
                                 valid_rois=valid_rois, vis_image=vis_image, mask_debug_vis=mask_debug_vis, 
-                                processing_stats=processing_stats, binary_mask=binary_mask)
+                                processing_stats=processing_stats, binary_mask=binary_mask, overlay_image=overlay_image)
             
         except Exception as e:
             rospy.logerr(f"Obstacle processing failed: {e}")
     
     def _extract_features_from_obstacles(self, obstacles_msg):
-        """Extract features from all obstacle ROIs"""
+        """Extract features from all obstacle ROIs (batch FastSAM processing)"""
         rospy.loginfo(f"Time from last processing: {time.time() - self.current_time:.3f}s")
         self.current_time = time.time()
         
@@ -123,10 +123,34 @@ class PrarSamNode:
         rospy.loginfo(f"Processing {len(obstacles_msg.box_ids)} obstacles")
         time_start = time.time()
 
+        # Pre-allocate overlay image and binary mask once for all obstacles
+        overlay_image = self.current_image.copy()
+        binary_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
+        
+        # Collect all SAM results for batch overlay processing
+        all_transformed_masks = []  # List of (color, transformed_mask)
+        
+        # Batch convert ROS image messages to numpy arrays (efficiency gain)
+        mask_conversion_start = time.time()
+        converted_masks = []
+        for i in range(len(obstacles_msg.box_ids)):
+            try:
+                mask = self.bridge.imgmsg_to_cv2(obstacles_msg.mask[i], "passthrough")
+                converted_masks.append(mask)
+            except Exception as e:
+                rospy.logerr(f"Failed to convert mask {i}: {e}")
+                converted_masks.append(None)
+        rospy.logdebug(f"Batch mask conversion: {time.time() - mask_conversion_start:.3f}s")
+
+        # Phase 1: Extract and validate ROIs
+        roi_extraction_data = []  # List of (index, box_id, roi, mask)
         for i, box_id in enumerate(obstacles_msg.box_ids):
             try:
-                # Convert mask and extract ROI
-                mask = self.bridge.imgmsg_to_cv2(obstacles_msg.mask[i], "passthrough")
+                mask = converted_masks[i]
+                if mask is None:
+                    masks.append(np.zeros((1, 1), dtype=np.uint8))
+                    continue
+                    
                 masks.append(mask)  # Collect mask for visualization
                 
                 roi = self.image_processor.extract_roi_from_mask(
@@ -137,15 +161,60 @@ class PrarSamNode:
                     rospy.logdebug(f"Invalid ROI for box_id {box_id}")
                     continue
                 
-                # Optional SAM processing
-                if self.config.RUN_SAM:
+                roi_extraction_data.append((i, box_id, roi, mask))
+                valid_rois.append(roi)
+                
+            except Exception as e:
+                rospy.logerr(f"ROI extraction failed for box_id {box_id}: {e}")
+                continue
+
+        # Phase 2: Batch FastSAM processing (GPU parallel)
+        sam_results_dict = {}  # box_id -> results mapping
+        
+        if roi_extraction_data and self.config.RUN_SAM:
+            batch_rois = [data[2] for data in roi_extraction_data]
+            batch_box_ids = [data[1] for data in roi_extraction_data]
+            
+            # Try batch processing first
+            batch_results = self.model_manager.run_fastsam_batch(batch_rois, batch_box_ids)
+            
+            if batch_results is not None:
+                # Batch processing succeeded
+                for box_id, results in batch_results:
+                    sam_results_dict[box_id] = results
+                    if results is not None and hasattr(results[0], 'masks'):
+                        processing_stats['processed_count'] += 1
+                        sam_time = processing_stats['sam_time'] / max(len(batch_results), 1)
+                        rospy.logdebug(f"Batch SAM result for box_id {box_id}: {results[0].masks.data.shape[0]} masks")
+            else:
+                # Fall back to sequential processing
+                rospy.loginfo("Batch processing disabled or failed, using sequential processing")
+                for i, box_id, roi, mask in roi_extraction_data:
                     sam_masks = self._process_with_sam(roi, box_id, processing_stats)
-                else:
-                    # create an all-ones mask for the ROI (1, H, W)
-                    sam_masks = torch.ones((1, roi.shape[0], roi.shape[1]), dtype=torch.uint8)
+                    if sam_masks.shape[0] > 0:
+                        sam_results_dict[box_id] = (type('Results', (), {'masks': type('Masks', (), {'data': sam_masks})()})(),)
+        elif not self.config.RUN_SAM:
+            # Create dummy results for all valid ROIs
+            for i, box_id, roi, mask in roi_extraction_data:
+                sam_masks = torch.ones((1, roi.shape[0], roi.shape[1]), dtype=torch.uint8)
+                sam_results_dict[box_id] = (type('Results', (), {'masks': type('Masks', (), {'data': sam_masks})()})(),)
 
-                binary_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
-
+        # Phase 3: Transform masks and create overlays
+        # **OPTIMIZATION**: Pre-allocate image_mask once and reuse
+        image_mask_template = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
+        
+        for i, box_id, roi, mask in roi_extraction_data:
+            try:
+                # Get SAM results
+                if box_id not in sam_results_dict:
+                    continue
+                
+                sam_result = sam_results_dict[box_id]
+                if sam_result is None:
+                    continue
+                
+                sam_masks = sam_result[0].masks.data
+                
                 # Transform SAM masks from ROI coordinate system to original image coordinate system
                 if sam_masks.shape[0] > 0:
                     # Get ROI bounding box in original image coordinates
@@ -155,46 +224,40 @@ class PrarSamNode:
                     box_height = obstacles_msg.box_height[i]
                     
                     # Transform each mask from ROI to image coordinates
-                    transformed_masks = []
                     for mask_idx in range(sam_masks.shape[0]):
                         roi_mask = sam_masks[mask_idx].cpu().numpy()
-                        image_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
                         resized_mask = cv2.resize(roi_mask.astype(np.uint8), 
                                                     (box_width, box_height),
                                                     interpolation=cv2.INTER_NEAREST)
-                        image_mask[box_y:box_y + box_height, 
-                                    box_x:box_x + box_width] = resized_mask
-                        transformed_masks.append(image_mask)
-                    
-                    # Overlay masks on current image
-                    overlay_image = self.current_image.copy()
-                    for mask_idx, transformed_mask in enumerate(transformed_masks):
+                        
+                        # **OPTIMIZATION**: Reuse template, clear only used region
+                        image_mask_template.fill(0)  # Fast clear
+                        image_mask_template[box_y:box_y + box_height, 
+                                          box_x:box_x + box_width] = resized_mask
+                        
+                        # Store color and mask for batch processing
                         color = self.color_generator.get_color(mask_idx)
-                        colored_mask = np.zeros_like(overlay_image)
-                        colored_mask[transformed_mask > 0] = color
-                        binary_mask = np.maximum(binary_mask, transformed_mask)
-
-                        # Blend with original image
-                        overlay_image = cv2.addWeighted(overlay_image, 0.7, colored_mask, 0.3, 0)
-
-                    # Publish segmented image
-                    segmented_msg = self.bridge.cv2_to_imgmsg(overlay_image, "bgr8")
-                    segmented_msg.header.stamp = rospy.Time.now()
-                    self.segmented_image_pub.publish(segmented_msg)
-                    # rospy.loginfo(f"Non 0 zones in binary mask for box_id {box_id}: {np.count_nonzero(binary_mask)}")
-                    rospy.logdebug(f"Transformed {len(transformed_masks)} masks to image coordinates for box_id {box_id}")
+                        # **MUST COPY**: We reuse image_mask_template in next iteration
+                        all_transformed_masks.append((color, image_mask_template.copy()))
+                        
+                        # Update binary mask
+                        binary_mask = np.maximum(binary_mask, image_mask_template)
+                    
+                    rospy.logdebug(f"Processed {sam_masks.shape[0]} masks for box_id {box_id}")
 
             except Exception as e:
-                rospy.logerr(f"Feature extraction failed for box_id {box_id}: {e}")
-                # Add empty mask for failed processing to maintain alignment
-                masks.append(np.zeros((1, 1), dtype=np.uint8))
+                rospy.logerr(f"Mask transformation failed for box_id {box_id}: {e}")
                 continue
 
+        # Batch blend all masks onto the image (vectorized operation)
+        if all_transformed_masks:
+            overlay_image = self._blend_masks_batch(overlay_image, all_transformed_masks)
+        
         time_end = time.time()
         total_time = time_end - time_start
         rospy.loginfo(f"Successfully processed {processing_stats['processed_count']} obstacles in {total_time:.3f}s")
 
-        return features, valid_rois, masks, processing_stats, binary_mask
+        return features, valid_rois, masks, processing_stats, binary_mask, overlay_image
     
     def _process_with_sam(self, roi, box_id, processing_stats) -> torch.Tensor:
         """Process ROI with FastSAM segmentation"""
@@ -215,6 +278,31 @@ class PrarSamNode:
             rospy.logerr(f"SAM processing failed for box_id {box_id}: {e}")
             return torch.empty((0, 0, 0))
         
+    def _blend_masks_batch(self, image, mask_color_pairs):
+        """Batch blend multiple masks onto image using vectorized operations
+        
+        Args:
+            image: Base image to blend onto
+            mask_color_pairs: List of (color, mask) tuples
+            
+        Returns:
+            Blended image
+        """
+        result = image.copy()
+        
+        # **OPTIMIZATION**: Pre-allocate colored_mask once
+        alpha = 0.3
+        colored_mask = np.zeros_like(image)
+        
+        for color, mask in mask_color_pairs:
+            # **OPTIMIZATION**: Reuse colored_mask, only clear non-zero regions
+            colored_mask.fill(0)  # Fast clear
+            colored_mask[mask > 0] = color
+            
+            # Blend using cv2.addWeighted (optimized C++ backend)
+            result = cv2.addWeighted(result, 1.0 - alpha, colored_mask, alpha, 0)
+        
+        return result
     def _create_visualization_image(self, obstacles_msg, valid_rois):
         """Create visualization image with bounding boxes and labels"""
         vis_image = self.current_image.copy()
@@ -269,22 +357,30 @@ class PrarSamNode:
             return None
     
     def _publish_results(self, obstacles_msg, features, valid_rois, 
-                        vis_image, mask_debug_vis, processing_stats, binary_mask):
-        """Publish all processing results"""
+                        vis_image, mask_debug_vis, processing_stats, binary_mask, overlay_image=None):
+        """Publish all processing results (merged visualization publishing)"""
         try:
-            # Publish visualization image
+            # Publish all visualizations in optimized order
+            # 1. Segmented image (once, after all obstacles processed)
+            if overlay_image is not None:
+                segmented_msg = self.bridge.cv2_to_imgmsg(overlay_image, "bgr8")
+                segmented_msg.header.stamp = rospy.Time.now()
+                self.segmented_image_pub.publish(segmented_msg)
+                rospy.logdebug("Published segmented image")
+            
+            # 2. Visualization image
             vis_msg = self.bridge.cv2_to_imgmsg(vis_image, "bgr8")
             vis_msg.header = obstacles_msg.header
             self.vis_pub.publish(vis_msg)
             
-            # Publish mask debug visualization
+            # 3. Mask debug visualization (vectorized)
             if mask_debug_vis is not None and self.config.ENABLE_MASK_DEBUG:
                 mask_debug_msg = self.bridge.cv2_to_imgmsg(mask_debug_vis, "bgr8")
                 mask_debug_msg.header = obstacles_msg.header
                 self.mask_vis_pub.publish(mask_debug_msg)
                 rospy.logdebug("Published mask debug visualization")
             
-            # Publish ROI grid visualization
+            # 4. ROI grid visualization
             if valid_rois:
                 roi_grid = self.image_processor.create_roi_grid(
                     valid_rois, obstacles_msg.box_ids[:len(valid_rois)])
@@ -293,17 +389,13 @@ class PrarSamNode:
                     roi_msg.header = obstacles_msg.header
                     self.roi_vis_pub.publish(roi_msg)
             
-            # Publish processed obstacles with features
+            # 5. Process and publish obstacles message
             processed_obstacles = self._create_obstacles_message(
                 obstacles_msg, features, binary_mask)
-            # rospy.loginfo(f"raw binary mask non zero zones: {np.count_nonzero(binary_mask.data)}")
-            # rospy.loginfo(f"binary mask in processed obstacles non zero zones: {np.count_nonzero(processed_obstacles.binary_mask.data)}")
             self.obstacles_pub.publish(processed_obstacles)
             
-            # Log processing statistics
-            rospy.loginfo(
-                f"SAM: {processing_stats['sam_time']:.3f}s"
-            )
+            # Log performance metrics
+            rospy.loginfo(f"SAM: {processing_stats['sam_time']:.3f}s")
             
         except Exception as e:
             rospy.logerr(f"Result publishing failed: {e}")
@@ -346,6 +438,8 @@ def update_params(ExtractorConfig):
     ExtractorConfig.SAM_CONFIDENCE = rospy.get_param('~sam_confidence', ExtractorConfig.SAM_CONFIDENCE)
     ExtractorConfig.SAM_IOU = rospy.get_param('~sam_iou', ExtractorConfig.SAM_IOU)
     ExtractorConfig.SAM_IMAGE_SIZE = rospy.get_param('~sam_image_size', ExtractorConfig.SAM_IMAGE_SIZE)
+    ExtractorConfig.SAM_BATCH_SIZE = rospy.get_param('~sam_batch_size', ExtractorConfig.SAM_BATCH_SIZE)
+    ExtractorConfig.SAM_ENABLE_BATCH = rospy.get_param('~sam_enable_batch', ExtractorConfig.SAM_ENABLE_BATCH)
     ExtractorConfig.MAX_ROI_SIZE = rospy.get_param('~max_roi_size', ExtractorConfig.MAX_ROI_SIZE)
     ExtractorConfig.MIN_ROI_WIDTH = rospy.get_param('~min_roi_width', ExtractorConfig.MIN_ROI_WIDTH)
     ExtractorConfig.MIN_ROI_HEIGHT = rospy.get_param('~min_roi_height', ExtractorConfig.MIN_ROI_HEIGHT)

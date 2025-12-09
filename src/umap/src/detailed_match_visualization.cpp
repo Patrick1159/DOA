@@ -201,25 +201,72 @@ void rematchNode::updateTrackerPath(
                     tracker_id, tracker_paths_[tracker_id].size(), position.x, position.y, position.z);
 }
 
-// Helper function: Publish tracker path
-void rematchNode::publishTrackerPath(
+// Helper function: Create path marker for a single tracker
+visualization_msgs::Marker rematchNode::createPathMarker(
     int tracker_id,
-    const ros::Time& timestamp) {
+    const ros::Time& timestamp) const {
     
-    if (tracker_paths_.find(tracker_id) == tracker_paths_.end()) {
+    visualization_msgs::Marker path_marker;
+    path_marker.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
+    path_marker.header.stamp = timestamp;
+    path_marker.ns = MARKER_NS_PATHS;
+    path_marker.id = tracker_id;
+    path_marker.type = visualization_msgs::Marker::LINE_STRIP;
+    path_marker.action = visualization_msgs::Marker::ADD;
+    
+    // Check if path exists
+    auto it = tracker_paths_.find(tracker_id);
+    if (it == tracker_paths_.end() || it->second.empty()) {
         ROS_DEBUG_NAMED("visualization", "[Path] No path found for tracker ID: %d", tracker_id);
-        return;
+        path_marker.action = visualization_msgs::Marker::DELETE;
+        return path_marker;
     }
     
-    nav_msgs::Path path;
-    path.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
-    path.header.stamp = timestamp;
-    path.poses = tracker_paths_[tracker_id];
+    // Add all points in the path
+    for (const auto& pose : it->second) {
+        path_marker.points.push_back(pose.pose.position);
+    }
     
-    path_pub_.publish(path);
+    // Set line properties
+    path_marker.scale.x = LINE_WIDTH * 2.0f;  // Thicker line for path
     
-    ROS_INFO("[Path] Published path for tracker ID %d with %zu poses on topic: %s", 
-             tracker_id, path.poses.size(), path_pub_.getTopic().c_str());
+    // Use color based on tracker ID for distinction
+    float hue = static_cast<float>(tracker_id % 360);
+    float r, g, b;
+    hsvToRgb(hue, 0.8f, 0.9f, r, g, b);
+    
+    path_marker.color.r = r;
+    path_marker.color.g = g;
+    path_marker.color.b = b;
+    path_marker.color.a = 0.8;
+    
+    ROS_DEBUG_NAMED("visualization", "[Path] Created path marker for tracker ID %d with %zu points", 
+                    tracker_id, path_marker.points.size());
+    
+    return path_marker;
+}
+
+// Helper function: HSV to RGB conversion for color generation
+void rematchNode::hsvToRgb(float h, float s, float v, float& r, float& g, float& b) const {
+    float c = v * s;
+    float x = c * (1.0f - std::abs(std::fmod(h / 60.0f, 2.0f) - 1.0f));
+    float m = v - c;
+    
+    if (h < 60) {
+        r = c; g = x; b = 0;
+    } else if (h < 120) {
+        r = x; g = c; b = 0;
+    } else if (h < 180) {
+        r = 0; g = c; b = x;
+    } else if (h < 240) {
+        r = 0; g = x; b = c;
+    } else if (h < 300) {
+        r = x; g = 0; b = c;
+    } else {
+        r = c; g = 0; b = x;
+    }
+    
+    r += m; g += m; b += m;
 }
 
 // Helper function: Delete markers for removed trackers
@@ -227,6 +274,7 @@ void rematchNode::deleteRemovedTrackerMarkers(
     const std::set<int>& current_tracker_ids,
     visualization_msgs::MarkerArray& marker_array,
     visualization_msgs::MarkerArray& text_marker_array,
+    visualization_msgs::MarkerArray& path_marker_array,
     const ros::Time& timestamp) {
     
     for (int old_id : last_tracker_ids_) {
@@ -244,6 +292,11 @@ void rematchNode::deleteRemovedTrackerMarkers(
             visualization_msgs::Marker delete_text_marker = delete_marker;
             delete_text_marker.ns = MARKER_NS_TEXT;
             text_marker_array.markers.push_back(delete_text_marker);
+            
+            // **NEW**: Delete path marker
+            visualization_msgs::Marker delete_path_marker = delete_marker;
+            delete_path_marker.ns = MARKER_NS_PATHS;
+            path_marker_array.markers.push_back(delete_path_marker);
             
             ROS_DEBUG_NAMED("visualization", "[Visualization] Deleting markers for tracker ID: %d", old_id);
         }
@@ -269,6 +322,7 @@ void rematchNode::publishVisualization()
     std::set<int> current_tracker_ids;
     visualization_msgs::MarkerArray marker_array;
     visualization_msgs::MarkerArray text_marker_array;
+    visualization_msgs::MarkerArray path_marker_array;  // **NEW**: Separate array for paths
     ros::Time current_time = curr_obstacles_raw_.header.stamp;
 
     ROS_DEBUG_NAMED("visualization", "[Visualization] Publishing visualization for %zu trackers", trackers_.size());
@@ -295,9 +349,12 @@ void rematchNode::publishVisualization()
         auto text_marker = createTextMarker(tracker_id, tracker_idx, marker.pose.position, current_time);
         text_marker_array.markers.push_back(text_marker);
         
-        // Update and publish tracker path
+        // Update tracker path (store history)
         updateTrackerPath(tracker_id, marker.pose.position, marker.header);
-        publishTrackerPath(tracker_id, current_time);
+        
+        // **NEW**: Create and add path marker
+        auto path_marker = createPathMarker(tracker_id, current_time);
+        path_marker_array.markers.push_back(path_marker);
         
         ROS_DEBUG_NAMED("visualization", "[Visualization] Processing tracker ID %d (idx %d) at position [%.3f, %.3f, %.3f]",
                        tracker_id, tracker_idx, marker.pose.position.x, marker.pose.position.y, marker.pose.position.z);
@@ -314,10 +371,13 @@ void rematchNode::publishVisualization()
         
         clear_marker.ns = MARKER_NS_TEXT;
         text_marker_array.markers.push_back(clear_marker);
+        
+        clear_marker.ns = MARKER_NS_PATHS;
+        path_marker_array.markers.push_back(clear_marker);
     }
     
     // Delete markers for trackers that are no longer active
-    deleteRemovedTrackerMarkers(current_tracker_ids, marker_array, text_marker_array, current_time);
+    deleteRemovedTrackerMarkers(current_tracker_ids, marker_array, text_marker_array, path_marker_array, current_time);
     last_tracker_ids_ = current_tracker_ids;
     
     // Clean up stale tracker paths
@@ -326,9 +386,10 @@ void rematchNode::publishVisualization()
     // Publish marker arrays
     marker_pub_.publish(marker_array);
     text_marker_pub_.publish(text_marker_array);
+    marker_pub_.publish(path_marker_array);  // **NEW**: Publish all path markers at once
     
-    ROS_DEBUG_NAMED("visualization", "[Visualization] Published %zu markers and %zu text markers", 
-                    marker_array.markers.size(), text_marker_array.markers.size());
+    ROS_DEBUG_NAMED("visualization", "[Visualization] Published %zu markers, %zu text markers, and %zu path markers", 
+                    marker_array.markers.size(), text_marker_array.markers.size(), path_marker_array.markers.size());
 }
 
 int main(int argc, char **argv)

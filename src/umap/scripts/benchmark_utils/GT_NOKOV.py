@@ -2,7 +2,19 @@
 
 """
 Subscribe topic /human_pose1 to get ground truth PoseStamped messages, 
-transform to camera frame using camera_pose, and export to csv format.
+optionally transform to camera frame using camera_pose, and export to csv format.
+
+Parameters:
+  ~use_camera_transform (bool, default: True): 
+    If True, transforms poses to camera frame using /camera/current_pose
+    If False, uses original world frame without transformation
+    
+Usage:
+  # With camera frame transformation (default):
+  rosrun umap GT_NOKOV.py
+  
+  # Without camera frame transformation (world frame):
+  rosrun umap GT_NOKOV.py _use_camera_transform:=false
 """
 import rospy
 from geometry_msgs.msg import PoseStamped
@@ -16,15 +28,22 @@ class GTAnalyse:
     def __init__(self):
         rospy.init_node('gt_analyse', anonymous=True)
         
+        # Get parameter to control camera frame transformation
+        self.use_camera_transform = rospy.get_param('~use_camera_transform', True)
+        
         # Initialize camera pose
         self.camera_pose = None
         self.camera_pose_lock = threading.Lock()
         
         # Subscribers
         self.subscriber = rospy.Subscriber('/human_pose_1', PoseStamped, self.human_pose_callback)
-        self.camera_pos_sub = rospy.Subscriber('/camera/current_pose', PoseStamped, self.camera_pose_callback)
         
-        rospy.loginfo("GT Analyse node initialized, waiting for camera pose...")
+        # Only subscribe to camera pose if transformation is enabled
+        if self.use_camera_transform:
+            self.camera_pos_sub = rospy.Subscriber('/camera/current_pose', PoseStamped, self.camera_pose_callback)
+            rospy.loginfo("GT Analyse node initialized with camera frame transformation ENABLED")
+        else:
+            rospy.loginfo("GT Analyse node initialized with camera frame transformation DISABLED (using world frame)")
 
     def camera_pose_callback(self, pose_msg):
         """Update camera pose for coordinate transformation"""
@@ -95,15 +114,22 @@ class GTAnalyse:
             return None
     
     def human_pose_callback(self, pose_msg):
-        # Transform pose to camera frame
-        transformed_pose = self.transform_pose_to_camera_frame(pose_msg)
-        if transformed_pose is None:
-            rospy.logwarn("Skipping pose - transformation failed")
-            return
+        # Transform pose to camera frame if enabled
+        if self.use_camera_transform:
+            transformed_pose = self.transform_pose_to_camera_frame(pose_msg)
+            if transformed_pose is None:
+                rospy.logwarn("Skipping pose - transformation failed")
+                return
+        else:
+            # Use original world frame pose without transformation
+            transformed_pose = pose_msg
         
         if not hasattr(self, '_csv_setup_done'):
             # configure CSV path and lock on first callback
-            self.csv_path = os.path.expanduser('/home/cius/DOA/src/benchmarks/occlusion_GT_camera_frame.csv')
+            if self.use_camera_transform:
+                self.csv_path = os.path.expanduser('/home/cius/DOA/src/benchmarks/occlusion_GT_camera_frame.csv')
+            else:
+                self.csv_path = os.path.expanduser('/home/cius/DOA/src/benchmarks/occlusion_GT_world_frame.csv')
             self._csv_lock = threading.Lock()
             self._csv_setup_done = True
 
@@ -122,7 +148,8 @@ class GTAnalyse:
         ori = transformed_pose.pose.orientation
 
         row = [timestamp, pos.x, pos.y, pos.z, ori.x, ori.y, ori.z, ori.w]
-        rospy.loginfo(f"Received GT pose at time {timestamp} (camera frame): position=({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f}), orientation=({ori.x:.3f}, {ori.y:.3f}, {ori.z:.3f}, {ori.w:.3f})")
+        frame_name = "camera frame" if self.use_camera_transform else "world frame"
+        rospy.loginfo(f"Received GT pose at time {timestamp} ({frame_name}): position=({pos.x:.3f}, {pos.y:.3f}, {pos.z:.3f}), orientation=({ori.x:.3f}, {ori.y:.3f}, {ori.z:.3f}, {ori.w:.3f})")
 
         # ensure directory exists
         csv_dir = os.path.dirname(self.csv_path)
@@ -141,11 +168,16 @@ class GTAnalyse:
                     writer.writerow(['time', 'pos_x', 'pos_y', 'pos_z', 'ori_x', 'ori_y', 'ori_z', 'ori_w'])
                 writer.writerow(row)
 
-        rospy.loginfo_throttle(5, "GT pose (camera frame) logged to %s (t=%.6f)" % (self.csv_path, timestamp))
+        frame_name = "camera frame" if self.use_camera_transform else "world frame"
+        rospy.loginfo_throttle(5, "GT pose (%s) logged to %s (t=%.6f)" % (frame_name, self.csv_path, timestamp))
 
     def main(self):
-        rospy.loginfo("GT Analyse node started - transforming poses to camera frame")
-        rospy.loginfo("Waiting for both human pose and camera pose topics...")
+        if self.use_camera_transform:
+            rospy.loginfo("GT Analyse node started - transforming poses to camera frame")
+            rospy.loginfo("Waiting for both human pose and camera pose topics...")
+        else:
+            rospy.loginfo("GT Analyse node started - using world frame (no transformation)")
+            rospy.loginfo("Waiting for human pose topic...")
         rospy.spin()
 
 if __name__ == "__main__":
