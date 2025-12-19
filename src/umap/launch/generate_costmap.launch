@@ -1,8 +1,9 @@
 <launch>
+    <arg name="map_file" default="corridor" />
 
-    <!-- Map to base_link transform -->
-    <node pkg="tf2_ros" type="static_transform_publisher" name="map_to_base_link" 
-          args="0 0 0 0 0 0 map base_link" />
+
+    <node name="map_server" pkg="map_server" type="map_server" 
+        args="$(find path_planning)/maps/$(arg map_file)/$(arg map_file).yaml" />
 
     <node name="costmap_generator" pkg="umap" type="costmap_generator" output="screen">
         <!-- Costmap parameters -->
@@ -12,14 +13,7 @@
         <param name="robot_height" value="2.0" />       <!-- Consider obstacles up to 2m -->
         <param name="obstacle_threshold" value="0.1" /> <!-- Points above 10cm are obstacles -->
         <param name="free_threshold" value="0.02" />    <!-- Points below 2cm are free space -->
-
-        <param name="inflation_radius_m" value="0.8" />
-        <param name="inflation_decay_alpha" value="10.0" />
-        <param name="border_band_m" value="0.5" />
-        <param name="border_cost" value="95" />
-        <param name="unknown_is_costly" value="true" type="bool" />
-        <param name="unknown_fill_cost" value="60" />
-
+        
         <!-- Frame parameters -->
         <param name="map_frame" value="map" />
         <param name="pointcloud_frame" value="camera_rgb_optical_frame" />
@@ -30,5 +24,7 @@
     </node>
 
     <!-- tf from map to world -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="map_to_base_link" 
+          args="0 0 0 0 0 0 map base_link" />
     <node pkg="tf" type="static_transform_publisher" name="map_to_world" args="0 0 0 0 0 0 world map 100" />
 </launch>
