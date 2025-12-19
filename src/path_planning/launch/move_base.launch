@@ -1,0 +1,53 @@
+<launch>
+  <!-- Arguments -->
+  <arg name="map_file" default="corridor" />
+  <arg name="cmd_vel_topic" default="/cmd_vel" />
+  <arg name="odom_topic" default="odom" />
+  <arg name="move_forward_only" default="false"/>
+
+  <!-- Map Server -->
+  <node name="map_server" pkg="map_server" type="map_server" 
+    args="$(find path_planning)/maps/$(arg map_file)/$(arg map_file).yaml" />
+
+  <!-- move_base -->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <param name="base_local_planner" value="dwa_controller/DWAController" />
+    
+    <!-- Load common params for both global and local costmaps -->
+    <rosparam file="$(find path_planning)/config/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find path_planning)/config/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    
+    <!-- Load specific params -->
+    <rosparam file="$(find path_planning)/config/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find path_planning)/config/global_costmap_params.yaml" command="load" />
+    <rosparam file="$(find path_planning)/config/move_base_params.yaml" command="load" />
+    
+    <!-- Remap topics -->
+    <remap from="cmd_vel" to="$(arg cmd_vel_topic)"/>
+    <remap from="odom" to="$(arg odom_topic)"/>
+    
+    <!-- DWA Planner params (optional, can be in move_base_params.yaml or separate) -->
+    <!-- <param name="DWAPlannerROS/min_vel_x" value="0.0" if="$(arg move_forward_only)" /> -->
+  </node>
+
+  <!-- Rviz -->
+  <node name="move_base_vis" pkg="rviz" type="rviz" args="-d $(find path_planning)/rviz/mapping.rviz" />
+
+  <!-- TEST -->
+  <node name="dummy_tf"
+        pkg="tf2_ros"
+        type="static_transform_publisher"
+        args="0 0 0 0 0 0 map world" />
+  <node name="dummy_tf_1"
+        pkg="tf2_ros"
+        type="static_transform_publisher"
+        args="0 0 0 0 0 0 world odom" />
+  <node name="dummy_tf_2"
+        pkg="tf2_ros"
+        type="static_transform_publisher"
+        args="0 0 0 0 0 0 odom base_link" />
+  <node name="dummy_tf_3"
+        pkg="tf2_ros"
+        type="static_transform_publisher"
+        args="0 0 0 0 0 0 base_link t265_link" />
+</launch>

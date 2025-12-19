@@ -1,0 +1,7 @@
+<library path="lib/libpath_planning_layer">
+  <class name="path_planning::DynamicObstacleLayer" type="path_planning::DynamicObstacleLayer" base_class_type="costmap_2d::Layer">
+    <description>
+      A layer that tracks dynamic obstacles and adds them to the costmap with velocity-based risk zones.
+    </description>
+  </class>
+</library>
