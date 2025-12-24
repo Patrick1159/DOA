@@ -5,6 +5,8 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_sensor_msgs/tf2_sensor_msgs.h>
 #include <geometry_msgs/TransformStamped.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 class CostmapGenerator
 {
@@ -12,6 +14,8 @@ private:
     ros::NodeHandle nh_;
     ros::Subscriber pointcloud_sub_;
     ros::Subscriber map_sub_;
+    ros::Subscriber goal_sub_;
+    ros::Subscriber pose_sub_;
     ros::Publisher costmap_pub_;
     
     nav_msgs::OccupancyGrid static_map_;
@@ -27,13 +31,20 @@ private:
     double robot_height_;
     double obstacle_threshold_;
     double free_threshold_;
+    double reach_tolerance_;
     std::string map_frame_;
     std::string pointcloud_frame_;
     
     nav_msgs::OccupancyGrid costmap_;
 
+    // Goal and Pose state
+    geometry_msgs::PoseStamped current_goal_;
+    bool has_goal_;
+    geometry_msgs::PoseStamped current_pose_;
+    bool has_pose_;
+
 public:
-    CostmapGenerator() : tf_listener_(tf_buffer_), has_static_map_(false)
+    CostmapGenerator() : tf_listener_(tf_buffer_), has_static_map_(false), has_goal_(false), has_pose_(false)
     {
         // Load parameters
         nh_.param("resolution", resolution_, 0.05);
@@ -42,12 +53,15 @@ public:
         nh_.param("robot_height", robot_height_, 2.0);
         nh_.param("obstacle_threshold", obstacle_threshold_, 0.1);
         nh_.param("free_threshold", free_threshold_, 0.05);
+        nh_.param("reach_tolerance", reach_tolerance_, 0.5);
         nh_.param<std::string>("map_frame", map_frame_, "map");
         nh_.param<std::string>("pointcloud_frame", pointcloud_frame_, "velodyne");
         
         // Initialize subscribers and publishers
         pointcloud_sub_ = nh_.subscribe("/velodyne_points", 1, &CostmapGenerator::pointCloudCallback, this);
         map_sub_ = nh_.subscribe("/map", 1, &CostmapGenerator::mapCallback, this);
+        goal_sub_ = nh_.subscribe("/move_base_simple/goal", 1, &CostmapGenerator::goalCallback, this);
+        pose_sub_ = nh_.subscribe("/camera/current_pose", 1, &CostmapGenerator::poseCallback, this);
         costmap_pub_ = nh_.advertise<nav_msgs::OccupancyGrid>("/costmap", 1);
         
         // Initialize costmap
@@ -75,6 +89,67 @@ public:
         static_map_ = *msg;
         has_static_map_ = true;
         ROS_INFO_ONCE("Received static map");
+    }
+
+    void goalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
+    {
+        current_goal_ = *msg;
+        has_goal_ = true;
+        ROS_INFO("Received goal. Clearing obstacles within %.2fm", reach_tolerance_);
+    }
+
+    void poseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg)
+    {
+        current_pose_ = *msg;
+        has_pose_ = true;
+    }
+
+    void clearCircularArea(const geometry_msgs::PoseStamped& target_pose)
+    {
+        geometry_msgs::PoseStamped map_pose;
+        try
+        {
+            if (target_pose.header.frame_id != map_frame_)
+            {
+                map_pose = tf_buffer_.transform(target_pose, map_frame_, ros::Duration(0.1));
+            }
+            else
+            {
+                map_pose = target_pose;
+            }
+        }
+        catch (tf2::TransformException& ex)
+        {
+            ROS_WARN_THROTTLE(1.0, "Cannot transform pose to map frame: %s", ex.what());
+            return;
+        }
+
+        double gx = map_pose.pose.position.x;
+        double gy = map_pose.pose.position.y;
+
+        int cx = static_cast<int>((gx - costmap_.info.origin.position.x) / resolution_);
+        int cy = static_cast<int>((gy - costmap_.info.origin.position.y) / resolution_);
+        
+        int radius_cells = static_cast<int>(reach_tolerance_ / resolution_);
+        int radius_sq = radius_cells * radius_cells;
+
+        for (int dy = -radius_cells; dy <= radius_cells; ++dy)
+        {
+            for (int dx = -radius_cells; dx <= radius_cells; ++dx)
+            {
+                if (dx * dx + dy * dy > radius_sq) continue;
+
+                int nx = cx + dx;
+                int ny = cy + dy;
+
+                if (nx >= 0 && nx < static_cast<int>(costmap_.info.width) &&
+                    ny >= 0 && ny < static_cast<int>(costmap_.info.height))
+                {
+                    int index = ny * costmap_.info.width + nx;
+                    costmap_.data[index] = 0; // Force free
+                }
+            }
+        }
     }
     
     void pointCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& msg)
@@ -133,9 +208,13 @@ public:
         // Generate costmap from point cloud
         generateCostmap(transformed_cloud);
         
+        if (has_goal_) clearCircularArea(current_goal_);
+        if (has_pose_) clearCircularArea(current_pose_);
+
         // Publish costmap
         costmap_.header.stamp = ros::Time::now();
         costmap_pub_.publish(costmap_);
+        ROS_INFO("Published costmap");
     }
     
     bool transformPointCloud(const sensor_msgs::PointCloud2& input_cloud, 
