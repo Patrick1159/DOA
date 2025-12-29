@@ -7,9 +7,12 @@
         <param name="output_frame" value="real_baselink" />
         <param name="k_init_frames" value="10" />
     </node>
-
-    <node name="map_server" pkg="map_server" type="map_server" 
-        args="$(find path_planning)/maps/$(arg map_file)/$(arg map_file).yaml" />
+    <node pkg="tf" 
+        type="static_transform_publisher" 
+        name="realsense_t265_to_d400" 
+        args="0 0 0.0 0 0.0 0 /real_baselink /d400_link 100"/>>
+    <!-- <node name="map_server" pkg="map_server" type="map_server" 
+        args="$(find path_planning)/maps/$(arg map_file)/$(arg map_file).yaml" /> -->
 
     <node name="costmap_generator" pkg="umap" type="costmap_generator" output="screen">
         <!-- Costmap parameters -->
@@ -20,6 +23,9 @@
         <param name="obstacle_threshold" value="0.1" /> <!-- Points above 10cm are obstacles -->
         <param name="free_threshold" value="0.02" />    <!-- Points below 2cm are free space -->
         <param name="reach_tolerance" value="0.5" /> 
+        <param name="t_pred" value="5.0" />              <!-- Predict 1 second into the future -->
+        <param name="eps" value="0.1" />
+        <param name="vel_uncertainty_rate" value="0.5" />
 
         <!-- Frame parameters -->
         <param name="map_frame" value="map" />

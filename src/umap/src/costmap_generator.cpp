@@ -7,11 +7,18 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <umap/TrackerDetails.h>
+#include <mutex>
+#include <vector>
+#include <cmath>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 
 class CostmapGenerator
 {
 private:
     ros::NodeHandle nh_;
+    ros::Subscriber dync_sub_;
     ros::Subscriber pointcloud_sub_;
     ros::Subscriber map_sub_;
     ros::Subscriber goal_sub_;
@@ -32,9 +39,12 @@ private:
     double obstacle_threshold_;
     double free_threshold_;
     double reach_tolerance_;
+    double eps_;
+    double t_pred_;
+    double vel_uncertainty_rate_;
     std::string map_frame_;
     std::string pointcloud_frame_;
-    
+
     nav_msgs::OccupancyGrid costmap_;
 
     // Goal and Pose state
@@ -42,6 +52,19 @@ private:
     bool has_goal_;
     geometry_msgs::PoseStamped current_pose_;
     bool has_pose_;
+
+    // Dynamic obstacles data structures
+    struct DynamicObstacle {
+        int32_t id;
+        geometry_msgs::Point position;
+        geometry_msgs::Vector3 velocity;
+        geometry_msgs::Vector3 dimensions;
+        double last_update_time;
+        double age;
+    };
+    
+    std::vector<DynamicObstacle> dynamic_obstacles_;
+    std::mutex obstacles_mutex_;  // Mutex for thread-safe access to dynamic_obstacles_
 
 public:
     CostmapGenerator() : tf_listener_(tf_buffer_), has_static_map_(false), has_goal_(false), has_pose_(false)
@@ -54,6 +77,9 @@ public:
         nh_.param("obstacle_threshold", obstacle_threshold_, 0.1);
         nh_.param("free_threshold", free_threshold_, 0.05);
         nh_.param("reach_tolerance", reach_tolerance_, 0.5);
+        nh_.param("eps", eps_, 0.25);
+        nh_.param("t_pred", t_pred_, 1.0);
+        nh_.param("vel_uncertainty_rate", vel_uncertainty_rate_, 0.2);
         nh_.param<std::string>("map_frame", map_frame_, "map");
         nh_.param<std::string>("pointcloud_frame", pointcloud_frame_, "velodyne");
         
@@ -62,12 +88,14 @@ public:
         map_sub_ = nh_.subscribe("/map", 1, &CostmapGenerator::mapCallback, this);
         goal_sub_ = nh_.subscribe("/move_base_simple/goal", 1, &CostmapGenerator::goalCallback, this);
         pose_sub_ = nh_.subscribe("/camera/current_pose", 1, &CostmapGenerator::poseCallback, this);
+        dync_sub_ = nh_.subscribe("/rematch/tracker_details", 1, &CostmapGenerator::dynamicObstaclesCallback, this);
+
         costmap_pub_ = nh_.advertise<nav_msgs::OccupancyGrid>("/costmap", 1);
         
         // Initialize costmap
         initializeCostmap();
         
-        ROS_INFO("Costmap Generator initialized");
+        ROS_INFO("Costmap Generator initialized with eps=%.2f", eps_);
     }
     
     void initializeCostmap()
@@ -84,6 +112,7 @@ public:
         costmap_.data.resize(costmap_.info.width * costmap_.info.height, -1);
     }
     
+    // Callback to receive static map
     void mapCallback(const nav_msgs::OccupancyGrid::ConstPtr& msg)
     {
         static_map_ = *msg;
@@ -152,6 +181,188 @@ public:
         }
     }
     
+
+    void dynamicObstaclesCallback(const umap::TrackerDetails::ConstPtr& msg)
+    {
+        std::lock_guard<std::mutex> lock(obstacles_mutex_);
+
+        dynamic_obstacles_.clear();
+        size_t num_obstacles = std::min(
+            std::min(msg->tracker_ids.size(), msg->positions.size()),
+            std::min(msg->velocities.size(), msg->box_dimensions.size())
+        );
+
+        // 获取相机到odom的变换
+        geometry_msgs::TransformStamped camera_to_odom_tf;
+        try {
+            // 假设相机坐标系是"camera_frame"，baselink坐标系是"base_link"
+            camera_to_odom_tf = tf_buffer_.lookupTransform(
+                "odom",  // target frame: odom
+                "real_baselink",  // source frame: camera
+                ros::Time(0)
+            );
+        } catch (tf2::TransformException& ex) {
+            ROS_WARN_THROTTLE(1.0, "Cannot get camera to odom transform: %s", ex.what());
+            return;
+        }
+        
+        tf2::Transform camera_to_odom;
+        tf2::fromMsg(camera_to_odom_tf.transform, camera_to_odom);
+        
+        // correction
+        tf2::Quaternion q_fix;
+        q_fix.setRPY(0, 0, M_PI / 2.0);  // roll=0, pitch=0, yaw=+90°
+        tf2::Transform T_fix;
+        T_fix.setIdentity();
+        T_fix.setRotation(q_fix);
+        tf2::Transform camera_to_odom_corrected;
+        camera_to_odom_corrected = T_fix * camera_to_odom;
+
+        for (size_t i = 0; i < num_obstacles; ++i)
+        {
+            DynamicObstacle obstacle;
+            obstacle.id = msg->tracker_ids[i];
+            
+            // 1. 从相机坐标系转换到baselink坐标系
+            tf2::Vector3 pos_camera(
+                msg->positions[i].x,
+                msg->positions[i].y,
+                msg->positions[i].z
+            );
+            
+            tf2::Vector3 vel_camera(
+                msg->velocities[i].x,
+                msg->velocities[i].y,
+                msg->velocities[i].z
+            );
+
+            // 位置变换: 应用相机到odom的变换
+            tf2::Vector3 pos_odom = camera_to_odom_corrected * pos_camera;
+
+            // 速度变换: 只旋转，不平移
+            tf2::Vector3 vel_odom = camera_to_odom_corrected.getBasis() * vel_camera;
+            
+            // 保存转换后的位置和速度
+            obstacle.position.x = pos_odom.x();
+            obstacle.position.y = pos_odom.y();
+            obstacle.position.z = pos_odom.z();
+            
+            obstacle.velocity.x = vel_odom.x();
+            obstacle.velocity.y = vel_odom.y();
+            obstacle.velocity.z = vel_odom.z();
+            
+            // 尺寸保持不变（标量）
+            obstacle.dimensions = msg->box_dimensions[i];
+            
+            if (i < msg->last_update_times.size()) {
+                obstacle.last_update_time = msg->last_update_times[i];
+            }
+            if (i < msg->ages.size()) {
+                obstacle.age = msg->ages[i];
+            }
+            
+            dynamic_obstacles_.push_back(obstacle);
+            
+            ROS_INFO("Dynamic obstacle %d: camera (%.2f, %.2f) -> odom (%.2f, %.2f)",
+                    obstacle.id,
+                    msg->positions[i].x, msg->positions[i].y,
+                    obstacle.position.x, obstacle.position.y);
+        }
+        
+        ROS_DEBUG("Received %zu dynamic obstacles", dynamic_obstacles_.size());
+    }
+    
+    void markDynamicObstaclesOnCostmap()
+    {
+        std::lock_guard<std::mutex> lock(obstacles_mutex_);
+
+        int width  = costmap_.info.width;
+        int height = costmap_.info.height;
+
+        std::vector<int8_t> dynamic_layer_(width * height, 0);
+        std::fill(dynamic_layer_.begin(), dynamic_layer_.end(), 0);
+
+        for (const auto& obstacle : dynamic_obstacles_)
+        {
+            // Convert world coordinates to grid coordinates
+            double wx = obstacle.position.x;
+            double wy = obstacle.position.y;
+
+            double ox = costmap_.info.origin.position.x;
+            double oy = costmap_.info.origin.position.y;
+
+            int mx = static_cast<int>(std::floor((wx - ox) / resolution_));
+            int my = static_cast<int>(std::floor((wy - oy) / resolution_));
+
+            if (mx < 0 || mx >= width || my < 0 || my >= height)
+                continue;
+
+            int radius = std::max(1,
+                static_cast<int>(std::ceil(eps_ / resolution_))
+            );
+            int r_sq = radius * radius;
+
+            for (int dy = -radius; dy <= radius; ++dy) {
+                for (int dx = -radius; dx <= radius; ++dx) {
+                    if (dx*dx + dy*dy > r_sq) continue;
+
+                    int nx = mx + dx;
+                    int ny = my + dy;
+
+                    if (nx < 0 || nx >= width || ny < 0 || ny >= height)
+                        continue;
+
+                    dynamic_layer_[ny * width + nx] = 100;
+                }
+            }
+            
+            // Optional: Inflate based on velocity magnitude
+            double t_pred = t_pred_; // seconds
+            double vx = obstacle.velocity.x;
+            double vy = obstacle.velocity.y;
+
+            int N = 20;
+
+            double base_radius = eps_;        // m
+            double uncertainty_rate = vel_uncertainty_rate_;    // m/s
+
+            for (int i = 0; i <= N; ++i) {
+                double alpha = static_cast<double>(i) / N;
+                double t = alpha * t_pred;
+
+                // 预测位置（map cell）
+                double px = mx + (vx * t) / resolution_;
+                double py = my + (vy * t) / resolution_;
+
+                // 时间相关的不确定性半径
+                double radius = base_radius + uncertainty_rate * t;
+                int radius_cells = static_cast<int>(radius / resolution_);
+
+                for (int dx = -radius_cells; dx <= radius_cells; ++dx) {
+                    for (int dy = -radius_cells; dy <= radius_cells; ++dy) {
+                        if (dx*dx + dy*dy > radius_cells*radius_cells)
+                            continue;
+
+                        int cx = static_cast<int>(px) + dx;
+                        int cy = static_cast<int>(py) + dy;
+
+                        if (cx < 0 || cx >= width || cy < 0 || cy >= height)
+                            continue;
+
+                        int8_t cost = static_cast<int8_t>(100 - 40 * alpha);
+                        dynamic_layer_[cy * width + cx] =
+                            std::max(dynamic_layer_[cy * width + cx], cost);
+                    }
+                }
+            }
+        }
+        
+        for (int i = 0; i < width * height; ++i) 
+        {
+            costmap_.data[i] = std::max(costmap_.data[i], dynamic_layer_[i]);
+        }
+    }
+
     void pointCloudCallback(const sensor_msgs::PointCloud2::ConstPtr& msg)
     {
         sensor_msgs::PointCloud2 transformed_cloud;
@@ -208,13 +419,16 @@ public:
         // Generate costmap from point cloud
         generateCostmap(transformed_cloud);
         
+        // Mark dynamic obstacles on the costmap
+        markDynamicObstaclesOnCostmap();
+        
         if (has_goal_) clearCircularArea(current_goal_);
         if (has_pose_) clearCircularArea(current_pose_);
 
         // Publish costmap
         costmap_.header.stamp = ros::Time::now();
         costmap_pub_.publish(costmap_);
-        ROS_INFO("Published costmap");
+        ROS_DEBUG_THROTTLE(1.0, "Published costmap with dynamic obstacles");
     }
     
     bool transformPointCloud(const sensor_msgs::PointCloud2& input_cloud, 
