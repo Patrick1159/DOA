@@ -40,6 +40,11 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
 {   
     curr_obstacles_raw_ = dync_obstacle_msg;
 
+    ROS_INFO("[Rematch] msg sizes -- box_ids:%zu centroid_x:%zu centroid_y:%zu centroid_z:%zu width:%zu height:%zu thickness:%zu box_w:%zu box_h:%zu features:%zu", 
+             dync_obstacle_msg.box_ids.size(), dync_obstacle_msg.centroid_x.size(), dync_obstacle_msg.centroid_y.size(), dync_obstacle_msg.centroid_z.size(),
+             dync_obstacle_msg.width.size(), dync_obstacle_msg.height.size(), dync_obstacle_msg.thickness.size(),
+             dync_obstacle_msg.box_width.size(), dync_obstacle_msg.box_height.size(), dync_obstacle_msg.features.size());
+
     // 1. Extract 3D bounding boxes from the message
     std::vector<Eigen::Vector3d> centroid_measurements;
     std::vector<Eigen::Vector3d> dimensions;
@@ -49,6 +54,34 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
 
     for (size_t i = 0; i < dync_obstacle_msg.box_ids.size(); i++)
     {
+        bool index_ok = true;
+        if (i >= dync_obstacle_msg.centroid_x.size() || i >= dync_obstacle_msg.centroid_y.size() || i >= dync_obstacle_msg.centroid_z.size()) {
+            ROS_ERROR("[Rematch][IdxMismatch] centroid size too short for i=%zu: cx=%zu cy=%zu cz=%zu", i,
+                      dync_obstacle_msg.centroid_x.size(), dync_obstacle_msg.centroid_y.size(), dync_obstacle_msg.centroid_z.size());
+            index_ok = false;
+        }
+        if (i >= dync_obstacle_msg.width.size() || i >= dync_obstacle_msg.height.size() || i >= dync_obstacle_msg.thickness.size()) {
+            ROS_ERROR("[Rematch][IdxMismatch] dimension size too short for i=%zu: w=%zu h=%zu t=%zu", i,
+                      dync_obstacle_msg.width.size(), dync_obstacle_msg.height.size(), dync_obstacle_msg.thickness.size());
+            index_ok = false;
+        }
+        if (i >= dync_obstacle_msg.box_width.size() || i >= dync_obstacle_msg.box_height.size()) {
+            ROS_ERROR("[Rematch][IdxMismatch] box2D size too short for i=%zu: bw=%zu bh=%zu", i,
+                      dync_obstacle_msg.box_width.size(), dync_obstacle_msg.box_height.size());
+            index_ok = false;
+        }
+        if (i >= dync_obstacle_msg.features.size()) {
+            ROS_ERROR("[Rematch][IdxMismatch] features vector shorter than box_ids: i=%zu features.size=%zu", i, dync_obstacle_msg.features.size());
+            index_ok = false;
+        } else {
+            ROS_INFO("[Rematch] det %zu feature length: %zu", i, dync_obstacle_msg.features[i].data.size());
+        }
+
+        if (!index_ok) {
+            ROS_WARN("[Rematch] Skip det %zu due to index mismatch", i);
+            continue;
+        }
+
         // Get centroids
         Eigen::Vector3d centroid_measurement;
         centroid_measurement << dync_obstacle_msg.centroid_x[i], dync_obstacle_msg.centroid_y[i], dync_obstacle_msg.centroid_z[i];
@@ -87,10 +120,24 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
     curr_centroidMeasurements_ = centroid_measurements;
     curr_sizes_ = dimensions;
 
-    matchAndUpdate(curr_obstacles);
+    try {
+        matchAndUpdate(curr_obstacles);
+    } catch (const std::exception& e) {
+        ROS_ERROR_STREAM("Exception caught in ## matchAndUpdate ##: " << e.what());
+    }
 
-    publishVisualization();
-    publishTrackerDetails(ros::Time::now().toSec());
+
+    try {
+        publishVisualization();
+    } catch (const std::exception& e) {
+        ROS_ERROR_STREAM("Exception caught in ## publishVisualization ##: " << e.what());
+    }
+
+    try {
+        publishTrackerDetails(ros::Time::now().toSec());
+    } catch (const std::exception& e) {
+        ROS_ERROR_STREAM("Exception caught in ## publishTrackerDetails ##: " << e.what());
+    }
 }
 
 /// @brief Calculate the bounding box for a given centroid and box size.
@@ -178,10 +225,20 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
             // 2. Cosine similarity for CLIP features
             const auto &feature1 = trackers[i].obcstacleClipFeatures;
             const auto &feature2 = measurements[j].feature;
-            double dot_product = std::inner_product(feature1.begin(), feature1.end(), feature2.begin(), 0.0);
-            double norm1 = std::sqrt(std::inner_product(feature1.begin(), feature1.end(), feature1.begin(), 0.0));
-            double norm2 = std::sqrt(std::inner_product(feature2.begin(), feature2.end(), feature2.begin(), 0.0));
-            double cosine_similarity = dot_product / (norm1 * norm2);
+            
+            double cosine_similarity = 0.0;
+            if (!feature1.empty() && !feature2.empty() && feature1.size() == feature2.size()) {
+                double dot_product = std::inner_product(feature1.begin(), feature1.end(), feature2.begin(), 0.0);
+                double norm1 = std::sqrt(std::inner_product(feature1.begin(), feature1.end(), feature1.begin(), 0.0));
+                double norm2 = std::sqrt(std::inner_product(feature2.begin(), feature2.end(), feature2.begin(), 0.0));
+                
+                if (norm1 > 1e-6 && norm2 > 1e-6) {
+                    cosine_similarity = dot_product / (norm1 * norm2);
+                }
+            } else {
+                ROS_WARN_THROTTLE(1.0, "Feature dimension mismatch or empty: T[%zu]=%zu, D[%zu]=%zu", 
+                                  i, feature1.size(), j, feature2.size());
+            }
 
             bool iou_valid = iou > IOU_THRESHOLD;
             bool distance_valid = distance < DISTANCE_THRESHOLD;

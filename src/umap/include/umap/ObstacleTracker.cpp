@@ -183,12 +183,17 @@ void ObstacleTracker::updateWithFeature(const Eigen::Vector3d& measurement, cons
     Eigen::MatrixXd u = Eigen::MatrixXd::Zero(1, 1);  // No control input
     kf.estimate(z, u);
 
+    ROS_INFO("[Tracker %d] feature size tracker:%zu new:%zu", track_id, obcstacleClipFeatures.size(), feature.size());
     // TODO: 将每个tracker的feature变成根据观测到的次数进行加权平均
     // Update the feature by averaging the old and new features
     // float alpha = 1.0f / static_cast<float>(update_count + 1); // Weight for the new feature
     // for (size_t i = 0; i < obcstacleClipFeatures.size(); ++i) {
     //     obcstacleClipFeatures[i] = obcstacleClipFeatures[i] * (1.0f - alpha) + feature[i] * alpha;
     // }
+    if (feature.size() < obcstacleClipFeatures.size()) {
+        ROS_ERROR("[Tracker %d] feature too short, skip update to avoid OOB", track_id);
+        return;
+    }
     for (size_t i = 0; i < obcstacleClipFeatures.size(); ++i) {
         obcstacleClipFeatures[i] = feature[i];
     }
