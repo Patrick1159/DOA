@@ -32,6 +32,7 @@ private:
     tf2_ros::TransformListener tf_listener_;
     
     // Parameters
+    bool simulation_;
     double resolution_;
     double map_width_;
     double map_height_;
@@ -39,11 +40,12 @@ private:
     double obstacle_threshold_;
     double free_threshold_;
     double reach_tolerance_;
+    double last_dync_info_time_;
+    double age_tolerance_;
     double eps_;
     double t_pred_;
     double vel_uncertainty_rate_;
     std::string map_frame_;
-    std::string pointcloud_frame_;
 
     nav_msgs::OccupancyGrid costmap_;
 
@@ -70,6 +72,7 @@ public:
     CostmapGenerator() : tf_listener_(tf_buffer_), has_static_map_(false), has_goal_(false), has_pose_(false)
     {
         // Load parameters
+        nh_.param("simulation", simulation_, true);
         nh_.param("resolution", resolution_, 0.05);
         nh_.param("map_width", map_width_, 20.0);
         nh_.param("map_height", map_height_, 20.0);
@@ -77,11 +80,11 @@ public:
         nh_.param("obstacle_threshold", obstacle_threshold_, 0.1);
         nh_.param("free_threshold", free_threshold_, 0.05);
         nh_.param("reach_tolerance", reach_tolerance_, 0.5);
+        nh_.param("age_tolerance", age_tolerance_, 1.0);
         nh_.param("eps", eps_, 0.25);
         nh_.param("t_pred", t_pred_, 1.0);
         nh_.param("vel_uncertainty_rate", vel_uncertainty_rate_, 0.2);
         nh_.param<std::string>("map_frame", map_frame_, "map");
-        nh_.param<std::string>("pointcloud_frame", pointcloud_frame_, "velodyne");
         
         // Initialize subscribers and publishers
         pointcloud_sub_ = nh_.subscribe("/velodyne_points", 1, &CostmapGenerator::pointCloudCallback, this);
@@ -184,6 +187,7 @@ public:
 
     void dynamicObstaclesCallback(const umap::TrackerDetails::ConstPtr& msg)
     {
+        last_dync_info_time_ = ros::Time::now().toSec();
         std::lock_guard<std::mutex> lock(obstacles_mutex_);
 
         dynamic_obstacles_.clear();
@@ -195,12 +199,20 @@ public:
         // 获取相机到odom的变换
         geometry_msgs::TransformStamped camera_to_odom_tf;
         try {
-            // 假设相机坐标系是"camera_frame"，baselink坐标系是"base_link"
+            if (simulation_) {
+                camera_to_odom_tf = tf_buffer_.lookupTransform(
+                    "odom",  // target frame: odom
+                    "camera_depth_frame",  // source frame: camera_depth_frame
+                    ros::Time(0)
+                );
+            }
+            else{
             camera_to_odom_tf = tf_buffer_.lookupTransform(
                 "odom",  // target frame: odom
-                "real_baselink",  // source frame: camera
+                "real_baselink",  // source frame: real_baselink
                 ros::Time(0)
             );
+            }
         } catch (tf2::TransformException& ex) {
             ROS_WARN_THROTTLE(1.0, "Cannot get camera to odom transform: %s", ex.what());
             return;
@@ -215,14 +227,24 @@ public:
         tf2::Transform T_fix;
         T_fix.setIdentity();
         T_fix.setRotation(q_fix);
+
         tf2::Transform camera_to_odom_corrected;
-        camera_to_odom_corrected = T_fix * camera_to_odom;
+        if (simulation_) {
+            // In simulation, no correction needed
+            camera_to_odom_corrected = camera_to_odom;
+        } else {
+            camera_to_odom_corrected = T_fix * camera_to_odom;
+        }
 
         for (size_t i = 0; i < num_obstacles; ++i)
         {
             DynamicObstacle obstacle;
             obstacle.id = msg->tracker_ids[i];
-            
+            obstacle.age = msg->ages[i];
+            if (obstacle.age > age_tolerance_) {
+                ROS_INFO("Ignoring obstacle %d due to age %.2f > %.2f", obstacle.id, obstacle.age, age_tolerance_);
+                continue;
+            }           
             // 1. 从相机坐标系转换到baselink坐标系
             tf2::Vector3 pos_camera(
                 msg->positions[i].x,
@@ -237,10 +259,18 @@ public:
             );
 
             // 位置变换: 应用相机到odom的变换
-            tf2::Vector3 pos_odom = camera_to_odom_corrected * pos_camera;
-
-            // 速度变换: 只旋转，不平移
-            tf2::Vector3 vel_odom = camera_to_odom_corrected.getBasis() * vel_camera;
+            tf2::Vector3 pos_odom;
+            tf2::Vector3 vel_odom;
+            if (simulation_) {
+                // In simulation, no correction needed
+                ROS_INFO("Simulation mode: no correction applied to dynamic obstacles");
+                pos_odom = pos_camera;
+                vel_odom = vel_camera;
+            } else {
+                ROS_INFO("Real mode: applying correction to dynamic obstacles");
+                pos_odom = camera_to_odom_corrected * pos_camera;
+                vel_odom = camera_to_odom_corrected.getBasis() * vel_camera;
+            }
             
             // 保存转换后的位置和速度
             obstacle.position.x = pos_odom.x();
@@ -276,6 +306,10 @@ public:
     {
         std::lock_guard<std::mutex> lock(obstacles_mutex_);
 
+        if (last_dync_info_time_ + 0.1 < ros::Time::now().toSec()) {
+            ROS_WARN_THROTTLE(0.1, "No recent dynamic obstacle info received");
+            return;
+        }
         int width  = costmap_.info.width;
         int height = costmap_.info.height;
 
@@ -349,7 +383,7 @@ public:
                         if (cx < 0 || cx >= width || cy < 0 || cy >= height)
                             continue;
 
-                        int8_t cost = static_cast<int8_t>(100 - 40 * alpha);
+                        int8_t cost = static_cast<int8_t>(100); // * (1.0 - alpha);
                         dynamic_layer_[cy * width + cx] =
                             std::max(dynamic_layer_[cy * width + cx], cost);
                     }

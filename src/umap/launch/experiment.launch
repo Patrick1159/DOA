@@ -23,8 +23,8 @@
     <node pkg="umap" type="coarse_match" name="coarse_match_tracker" output="screen" />
 
     <!-- DETAILED -->
-    <rosparam command="load" file="$(find umap)/config/real_config.yaml" />
-    <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
+    <!-- <rosparam command="load" file="$(find umap)/config/real_config.yaml" />
+    <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" /> -->
 
     <!-- Feature Extractor -->
     <node pkg="umap" type="para_samnode.py" name="para_sam_node" output="screen">
