@@ -6,13 +6,21 @@
 
 using namespace std::chrono;
 
+// Helper: duration between two steady_clock time_points in milliseconds
+static inline float ms_between(const rematchNode::TimePoint& t0,
+                                const rematchNode::TimePoint& t1) {
+    return static_cast<float>(
+        duration_cast<microseconds>(t1 - t0).count()) / 1000.0f;
+}
+
 rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh)
 {
     obstacles_sub_ = nh_.subscribe("/model_output/obstacles", 10, &rematchNode::obstacles2Tracker, this);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualization/tracked_obstacles", 10);
     text_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualizationtext_markers", 10);
     path_pub_ = nh_.advertise<nav_msgs::Path>("rematch/obstacle_paths", 10);
-    tracker_details_pub_ = nh_.advertise<umap::TrackerDetails>("/rematch/tracker_details", 10);
+    tracker_details_pub_ = nh_.advertise<umap::TrackerDetailArray>("/rematch/tracker_details", 10);
+    statistics_pub_ = nh_.advertise<umap::RematchStatistics>("/rematch_statistics", 10);
 
     nh_.param("rematch_node/SIMILARITY_THRESHOLD", rematch_params_.SIMILARITY_THRESHOLD, 0.6);
     nh_.param("rematch_node/SIMILARITY_WEIGHT", rematch_params_.SIMILARITY_WEIGHT, 0.5);
@@ -37,7 +45,10 @@ rematchNode::~rematchNode()
 /// @brief Callback function. Convert Obstacle message to tracker measurements & features.
 /// @param dync_obstacle_msg
 void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
-{   
+{
+    // ── Profiling: record callback entry time ─────────────────────────────────
+    tp_cb_start_ = std::chrono::steady_clock::now();
+
     curr_obstacles_raw_ = dync_obstacle_msg;
 
     ROS_INFO("[Rematch] msg sizes -- box_ids:%zu centroid_x:%zu centroid_y:%zu centroid_z:%zu width:%zu height:%zu thickness:%zu box_w:%zu box_h:%zu features:%zu", 
@@ -120,6 +131,11 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
     curr_centroidMeasurements_ = centroid_measurements;
     curr_sizes_ = dimensions;
 
+    // ── Profiling: parsing done ───────────────────────────────────────────────
+    tp_parse_done_ = std::chrono::steady_clock::now();
+    stat_num_detections_ = static_cast<int>(curr_obstacles.size());
+    stat_num_trackers_   = static_cast<int>(trackers_.size());
+
     try {
         matchAndUpdate(curr_obstacles);
     } catch (const std::exception& e) {
@@ -133,10 +149,36 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
         ROS_ERROR_STREAM("Exception caught in ## publishVisualization ##: " << e.what());
     }
 
+    // ── Profiling: visualization done ────────────────────────────────────────
+    tp_vis_done_ = std::chrono::steady_clock::now();
+
     try {
         publishTrackerDetails(ros::Time::now().toSec());
     } catch (const std::exception& e) {
         ROS_ERROR_STREAM("Exception caught in ## publishTrackerDetails ##: " << e.what());
+    }
+
+    // ── Profiling: assemble and publish statistics ────────────────────────────
+    {
+        auto tp_end = std::chrono::steady_clock::now();
+        umap::RematchStatistics stats;
+        stats.header.stamp    = ros::Time::now();
+        stats.header.frame_id = "rematch_profiler";
+
+        stats.num_detections    = stat_num_detections_;
+        stats.num_trackers      = stat_num_trackers_;
+        stats.num_matched       = stat_num_matched_;
+        stats.num_unmatched_det = stat_num_unmatched_;
+
+        stats.t_parse_ms       = ms_between(tp_cb_start_,   tp_parse_done_);
+        stats.t_cost_matrix_ms = ms_between(tp_parse_done_,  tp_cost_done_);
+        stats.t_association_ms = ms_between(tp_cost_done_,   tp_assoc_done_);
+        stats.t_update_ms      = ms_between(tp_assoc_done_,  tp_update_done_);
+        stats.t_publish_vis_ms = ms_between(tp_update_done_, tp_vis_done_);
+        stats.t_publish_det_ms = ms_between(tp_vis_done_,    tp_end);
+        stats.t_total_ms       = ms_between(tp_cb_start_,    tp_end);
+
+        publishStatistics(stats);
     }
 }
 
@@ -280,6 +322,10 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
     ROS_INFO_STREAM(ss.str());
     ROS_INFO("==============================");
     ROS_INFO("=== Match Evaluation End ===");
+
+    // ── Profiling: cost matrix computation done ───────────────────────────────
+    tp_cost_done_ = std::chrono::steady_clock::now();
+
     return cost_matrix;
 }
 
@@ -424,6 +470,10 @@ std::vector<std::pair<int, int>> rematchNode::association(Eigen::MatrixXd &cost_
             // std::cout << "Detection " << j << " unmatched" << std::endl;
         // }
     // }
+
+    // ── Profiling: Munkres association done ──────────────────────────────────
+    tp_assoc_done_ = std::chrono::steady_clock::now();
+
     return assignments;
 }
 
@@ -456,7 +506,6 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
 
     // 2. 执行匈牙利算法
     auto matched_pairs = association(cost_matrix);
-    // Output matched pairs
     // ROS_ERROR("Matched Pairs:");
     // for (const auto& match : matched_pairs) {
     //     ROS_INFO("Tracker idx %d matched with Detection idx %d", match.first, match.second);
@@ -561,6 +610,10 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
     // 7. 更新tracker的生命周期
     updateTrackerLifecycles(trackers_, current_time, rematch_params_.MAX_TRACKER_AGE);
 
+    // ── Profiling: matchAndUpdate done ────────────────────────────────────────
+    tp_update_done_ = std::chrono::steady_clock::now();
+    stat_num_matched_   = static_cast<int>(matched_pairs.size());
+    stat_num_unmatched_ = static_cast<int>(unmatched.size());
 }
 
 std::vector<Eigen::Vector3d> rematchNode::getNextKFrameState(const onboardDetector::ObstacleTracker& tracker, int K) {
@@ -578,7 +631,7 @@ std::vector<Eigen::Vector3d> rematchNode::getNextKFrameState(const onboardDetect
 /// @brief Publish tracker details for logging and analysis
 /// @param current_time Current timestamp
 void rematchNode::publishTrackerDetails(double current_time) {
-    umap::TrackerDetails tracker_details_msg;
+    umap::TrackerDetailArray tracker_details_msg;
     
     // Set header
     tracker_details_msg.header.stamp = ros::Time::now();
@@ -588,29 +641,37 @@ void rematchNode::publishTrackerDetails(double current_time) {
     for (const auto& tracker : trackers_) {
         auto state = tracker.getState();
         
-        tracker_details_msg.tracker_ids.push_back(tracker.track_id);
+        umap::TrackerDetail detail;
+        detail.tracker_id = tracker.track_id;
         
-        geometry_msgs::Point position;
-        position.x = state.position.x();
-        position.y = state.position.y();
-        position.z = state.position.z();
-        tracker_details_msg.positions.push_back(position);
+        detail.position.x = state.position.x();
+        detail.position.y = state.position.y();
+        detail.position.z = state.position.z();
         
-        geometry_msgs::Vector3 velocity;
-        velocity.x = state.velocity.x();
-        velocity.y = state.velocity.y();
-        velocity.z = state.velocity.z();
-        tracker_details_msg.velocities.push_back(velocity);
+        detail.velocity.x = state.velocity.x();
+        detail.velocity.y = state.velocity.y();
+        detail.velocity.z = state.velocity.z();
         
-        geometry_msgs::Vector3 box_dim;
-        box_dim.x = tracker.box_dimensions.x();
-        box_dim.y = tracker.box_dimensions.y();
-        box_dim.z = tracker.box_dimensions.z();
-        tracker_details_msg.box_dimensions.push_back(box_dim);
+        detail.box_dimensions.x = tracker.box_dimensions.x();
+        detail.box_dimensions.y = tracker.box_dimensions.y();
+        detail.box_dimensions.z = tracker.box_dimensions.z();
         
-        tracker_details_msg.last_update_times.push_back(tracker.getLastUpdateTime());
-        tracker_details_msg.ages.push_back(current_time - tracker.getLastUpdateTime());
+        detail.last_update_time = tracker.getLastUpdateTime();
+        detail.age = current_time - tracker.getLastUpdateTime();
+        
+        tracker_details_msg.trackers.push_back(detail);
     }
-    ROS_INFO("Publishing tracker details with %zu entries", tracker_details_msg.tracker_ids.size());
+    ROS_INFO("Publishing tracker details with %zu entries", tracker_details_msg.trackers.size());
     tracker_details_pub_.publish(tracker_details_msg);
+}
+
+/// @brief Publish per-frame profiling statistics to /rematch_statistics
+/// @param stats Fully populated RematchStatistics message
+void rematchNode::publishStatistics(const umap::RematchStatistics& stats)
+{
+    statistics_pub_.publish(stats);
+    ROS_DEBUG("[Rematch profiler] total=%.2f ms  parse=%.2f  cost=%.2f  assoc=%.2f  update=%.2f  vis=%.2f  det=%.2f",
+              stats.t_total_ms, stats.t_parse_ms, stats.t_cost_matrix_ms,
+              stats.t_association_ms, stats.t_update_ms,
+              stats.t_publish_vis_ms, stats.t_publish_det_ms);
 }

@@ -7,7 +7,7 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
-#include <umap/TrackerDetails.h>
+#include <umap/TrackerDetailArray.h>
 #include <mutex>
 #include <vector>
 #include <cmath>
@@ -185,16 +185,13 @@ public:
     }
     
 
-    void dynamicObstaclesCallback(const umap::TrackerDetails::ConstPtr& msg)
+    void dynamicObstaclesCallback(const umap::TrackerDetailArray::ConstPtr& msg)
     {
         last_dync_info_time_ = ros::Time::now().toSec();
         std::lock_guard<std::mutex> lock(obstacles_mutex_);
 
         dynamic_obstacles_.clear();
-        size_t num_obstacles = std::min(
-            std::min(msg->tracker_ids.size(), msg->positions.size()),
-            std::min(msg->velocities.size(), msg->box_dimensions.size())
-        );
+        size_t num_obstacles = msg->trackers.size();
 
         // 获取相机到odom的变换
         geometry_msgs::TransformStamped camera_to_odom_tf;
@@ -239,23 +236,23 @@ public:
         for (size_t i = 0; i < num_obstacles; ++i)
         {
             DynamicObstacle obstacle;
-            obstacle.id = msg->tracker_ids[i];
-            obstacle.age = msg->ages[i];
+            obstacle.id = msg->trackers[i].tracker_id;
+            obstacle.age = msg->trackers[i].age;
             if (obstacle.age > age_tolerance_) {
                 ROS_INFO("Ignoring obstacle %d due to age %.2f > %.2f", obstacle.id, obstacle.age, age_tolerance_);
                 continue;
             }           
             // 1. 从相机坐标系转换到baselink坐标系
             tf2::Vector3 pos_camera(
-                msg->positions[i].x,
-                msg->positions[i].y,
-                msg->positions[i].z
+                msg->trackers[i].position.x,
+                msg->trackers[i].position.y,
+                msg->trackers[i].position.z
             );
             
             tf2::Vector3 vel_camera(
-                msg->velocities[i].x,
-                msg->velocities[i].y,
-                msg->velocities[i].z
+                msg->trackers[i].velocity.x,
+                msg->trackers[i].velocity.y,
+                msg->trackers[i].velocity.z
             );
 
             // 位置变换: 应用相机到odom的变换
@@ -282,20 +279,16 @@ public:
             obstacle.velocity.z = vel_odom.z();
             
             // 尺寸保持不变（标量）
-            obstacle.dimensions = msg->box_dimensions[i];
+            obstacle.dimensions = msg->trackers[i].box_dimensions;
             
-            if (i < msg->last_update_times.size()) {
-                obstacle.last_update_time = msg->last_update_times[i];
-            }
-            if (i < msg->ages.size()) {
-                obstacle.age = msg->ages[i];
-            }
+            obstacle.last_update_time = msg->trackers[i].last_update_time;
+            obstacle.age = msg->trackers[i].age;
             
             dynamic_obstacles_.push_back(obstacle);
             
             ROS_INFO("Dynamic obstacle %d: camera (%.2f, %.2f) -> odom (%.2f, %.2f)",
                     obstacle.id,
-                    msg->positions[i].x, msg->positions[i].y,
+                    msg->trackers[i].position.x, msg->trackers[i].position.y,
                     obstacle.position.x, obstacle.position.y);
         }
         

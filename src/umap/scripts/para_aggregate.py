@@ -1,4 +1,4 @@
-#!/home/cius/miniconda3/envs/DOA/bin/python3
+#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
 """
 Subscribe CLIP and SAM messages, publish full /model_output/obstacles message.
 
@@ -15,7 +15,7 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from std_msgs.msg import Float32MultiArray
 from geometry_msgs.msg import PoseStamped
-from umap.msg import Obstacles
+from umap.msg import Obstacles, RematchStatistics
 import message_filters
 from scipy.spatial.transform import Rotation as R
 
@@ -37,6 +37,7 @@ class ParaMsgAggregator:
 
         # Publisher
         self.obstacle_pub = rospy.Publisher('/model_output/obstacles', Obstacles, queue_size=10)
+        self.statistics_pub = rospy.Publisher('/rematch_statistics_aggregator', RematchStatistics, queue_size=10)
 
         # Subscribers (message_filters for time sync)
         cam_pose_sub = rospy.Subscriber('/camera/current_pose', PoseStamped, self.pose_callback)
@@ -84,6 +85,7 @@ class ParaMsgAggregator:
 
     def _synced_callback(self, sam_msg: Obstacles, clip_msg: Obstacles):
         """Callback when SAM and CLIP messages are time-synchronized"""
+        agg_start = time.time()
         try:
             aggregated_msg = Obstacles()
             aggregated_msg.header = sam_msg.header  # use SAM header as base
@@ -124,6 +126,33 @@ class ParaMsgAggregator:
             # Publish once per synchronized pair
             self.obstacle_pub.publish(aggregated_msg)
             rospy.loginfo("Published aggregated obstacles message (synced SAM+CLIP)")
+
+            # Publish rematch statistics
+            agg_total = time.time() - agg_start
+            # Sync wait time: difference between the two message stamps
+            sam_t = sam_msg.header.stamp.to_sec()
+            clip_t = clip_msg.header.stamp.to_sec()
+            sync_wait = abs(sam_t - clip_t)
+
+            stats_msg = RematchStatistics()
+            stats_msg.header = aggregated_msg.header
+            stats_msg.node_name = 'aggregator'
+            stats_msg.obstacle_count = len(list(sam_msg.box_ids))
+            stats_msg.total_time = agg_total
+            stats_msg.model_time = 0.0
+            stats_msg.preprocess_time = 0.0
+            stats_msg.postprocess_time = agg_total
+            stats_msg.avg_model_time_per_obstacle = 0.0
+            stats_msg.sync_wait_time = sync_wait
+            # end-to-end latency: now - aggregated message stamp
+            try:
+                stats_msg.e2e_latency = rospy.Time.now().to_sec() - aggregated_msg.header.stamp.to_sec()
+            except Exception:
+                stats_msg.e2e_latency = 0.0
+            self.statistics_pub.publish(stats_msg)
+            rospy.loginfo(
+                f"Aggregator: total={agg_total*1000:.1f}ms  sync_wait={sync_wait*1000:.1f}ms  obstacles={stats_msg.obstacle_count}"
+            )
         except Exception as e:
             rospy.logerr(f"[Aggregator] Error in synchronized callback: {e}")
 

@@ -9,7 +9,7 @@ import rospy
 import csv
 import os
 from datetime import datetime
-from umap.msg import TrackerDetails
+from umap.msg import TrackerDetailArray
 
 class TrackerStatistics:
     def __init__(self):
@@ -32,7 +32,7 @@ class TrackerStatistics:
         self.generate_processing_script()
         
         # Subscribe to tracker details topic
-        self.subscriber = rospy.Subscriber('/rematch/tracker_details', TrackerDetails, self.tracker_callback)
+        self.subscriber = rospy.Subscriber('/rematch/tracker_details', TrackerDetailArray, self.tracker_callback)
         
         rospy.loginfo(f"TrackerStatistics node started. Logging to: {self.csv_filename}")
         
@@ -90,20 +90,20 @@ echo "Data processing completed for timestamp: {self.timestamp}"
                 timestamp = msg.header.stamp.to_sec()
                 
                 # Write data for each tracker
-                for i in range(len(msg.tracker_ids)):
+                for tracker in msg.trackers:
                     row = [
                         timestamp,
-                        msg.tracker_ids[i],
-                        msg.positions[i].x,
-                        msg.positions[i].y,
-                        msg.positions[i].z,
-                        msg.velocities[i].x,
-                        msg.velocities[i].y,
-                        msg.velocities[i].z
+                        tracker.tracker_id,
+                        tracker.position.x,
+                        tracker.position.y,
+                        tracker.position.z,
+                        tracker.velocity.x,
+                        tracker.velocity.y,
+                        tracker.velocity.z
                     ]
                     writer.writerow(row)
                     
-            rospy.loginfo(f"Logged {len(msg.tracker_ids)} tracker entries at time {timestamp}")
+            rospy.loginfo(f"Logged {len(msg.trackers)} tracker entries at time {timestamp}")
             
         except Exception as e:
             rospy.logerr(f"Error writing to CSV file: {e}")

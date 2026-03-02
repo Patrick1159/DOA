@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="rgb_topic" default="/camera/rgb/image_raw" />
-    <arg name="aligned_depth_topic" default="/camera/depth/image_raw" />
+    <arg name="rgb_topic" default="/d435/image_raw" />
+    <arg name="aligned_depth_topic" default="/d435/depth/image_raw" />
     
     <!-- Launch RViz for visualization -->
-    <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d /home/user/new_DOA/DOA/src/umap/rviz/benchmark.rviz" /> -->
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find umap)/rviz/simulation.rviz" />
 
     <!-- UMAP -->
     <!-- Load parameters -->
@@ -38,7 +38,7 @@
     <!-- Pointcloud Generate -->
     <node pkg="pointcloud_generator" type="camera_pose.py" name="d435_pose" output="screen">
         <param name="parent_frame_id" value="odom" />
-        <param name="child_frame_id" value="camera_rgb_optical_frame" />
+        <param name="child_frame_id" value="d435_color_optical_frame" />
     </node>
 
     <node name="camera_node" pkg="pointcloud_generator" type="processor" output="screen">

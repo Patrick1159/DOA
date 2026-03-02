@@ -4,7 +4,8 @@
 #include <umap/ObstacleTracker.h>
 #include <umap/umapProcess.h>
 #include <umap/umapType.h>
-#include <umap/TrackerDetails.h>
+#include <umap/TrackerDetailArray.h>
+#include <umap/RematchStatistics.h>
 
 #include <Eigen/Dense>
 #include <vector>
@@ -40,6 +41,7 @@ private:
     ros::Publisher text_marker_pub_;
     ros::Publisher path_pub_;
     ros::Publisher tracker_details_pub_;
+    ros::Publisher statistics_pub_;   ///< Publishes to /rematch_statistics
     
     rematchParams rematch_params_;
 
@@ -67,8 +69,24 @@ private:
     std::vector<std::pair<int, int>> association(Eigen::MatrixXd &cost_matrix);
     void publishVisualization();
     void publishTrackerDetails(double current_time);
+    void publishStatistics(const umap::RematchStatistics& stats);
 
     Eigen::MatrixXd getCostMatrix(vector<onboardDetector::ObstacleTracker>& trackers, const vector<ObstacleMeasureFeature>& measurements);
+
+    // ── Per-frame profiling timestamps (set inside obstacles2Tracker) ─────────
+    using TimePoint = std::chrono::steady_clock::time_point;
+    TimePoint tp_cb_start_;
+    TimePoint tp_parse_done_;
+    TimePoint tp_cost_done_;
+    TimePoint tp_assoc_done_;
+    TimePoint tp_update_done_;
+    TimePoint tp_vis_done_;
+
+    // Cached counts for statistics message
+    int stat_num_detections_  = 0;
+    int stat_num_trackers_    = 0;
+    int stat_num_matched_     = 0;
+    int stat_num_unmatched_   = 0;
 
     // Helper functions for visualization
     int findTrackerIndexById(int tracker_id) const;

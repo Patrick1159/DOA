@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Arguments -->
+    <arg name="rgb_topic" default="/d435/image_raw" />
+    <arg name="aligned_depth_topic" default="/d435/depth/image_raw" />
+    <arg name="dynamic_scene" default="1" doc="0: random movement, 1: corridor" />
+    
+    <!-- ========== Gazebo Simulation ========== -->
+    <include file="$(find my_tb3_description)/launch/my_tb3_gazebo.launch" />
+
+    <!-- ========== Dynamic Obstacles ========== -->
+    <include file="$(find my_tb3_description)/launch/dync_obs.launch">
+        <arg name="scene" value="$(arg dynamic_scene)"/>
+    </include>
+
+    <!-- ========== DOA Perception System ========== -->
+    <!-- Load parameters -->
+    <rosparam command="load" file="$(find umap)/config/simulation.yaml" />
+    
+    <!-- UMAP Detection -->
+    <node pkg="umap" type="umap_extract" name="umap_node" output="screen">
+        <remap from="/camera/aligned_depth_to_color/image_raw" to="$(arg aligned_depth_topic)"/>
+        <remap from="/camera/color/image_raw" to="$(arg rgb_topic)" />
+    </node>
+
+    <!-- Coarse Match Tracker -->
+    <node pkg="umap" type="coarse_match" name="coarse_match_tracker" output="screen" />
+
+    <!-- Feature Extractors (FastSAM + CLIP) -->
+    <node pkg="umap" type="para_samnode.py" name="para_sam_node" output="screen">
+        <param name="image_topic" value="$(arg rgb_topic)" />
+    </node>
+    <node pkg="umap" type="para_clipnode.py" name="para_clip_node" output="screen">
+        <param name="image_topic" value="$(arg rgb_topic)" />
+    </node>
+    <node pkg="umap" type="para_aggregate.py" name="para_aggregate_node" output="screen"/>
+
+    <!-- Pointcloud Generator -->
+    <node pkg="pointcloud_generator" type="camera_pose.py" name="d435_pose" output="screen">
+        <param name="parent_frame_id" value="odom" />
+        <param name="child_frame_id" value="d435_color_optical_frame" />
+    </node>
+
+    <node name="camera_node" pkg="pointcloud_generator" type="processor" output="screen">
+        <rosparam file="$(find pointcloud_generator)/param/sim_param.yaml" command="load"/>
+        <param name="/camera/pointcloud_frame_id" value="odom"/>
+        <param name="/pointcloud_generate/dynamic_only" value="true"/>
+        <param name="/pointcloud_generate/camera/view_field" value="4.0"/>
+        <param name="/pointcloud_generate/camera/self_filter" value="0.0025"/>
+        <param name="/pointcloud_generate/camera/grid_size" value="0.05"/>
+        <param name="/pointcloud_generate/camera/eud_range" value="0.01"/>
+        <param name="/pointcloud_generate/camera/eud_min_points_num" value="1"/>
+
+        <remap from="/RED/pointcloud_process/camera_pose" to="/camera/current_pose"/>
+        <remap from="/RED/pointcloud_process/odom" to="/uav0/mavros/local_position/odom"/>
+        <remap from="/RED/pointcloud_process/color_image" to="$(arg rgb_topic)"/>
+        <remap from="/RED/pointcloud_process/depth_image" to="$(arg aligned_depth_topic)"/>
+        <remap from="/model_output/obstacles" to="/model_output/obstacles"/>
+    </node>
+
+    <!-- ========== DOA to MPC Adapter ========== -->
+    <node pkg="mpc_nav" type="doa_to_obstacles.py" name="doa_adapter" output="screen">
+        <param name="target_frame" value="odom"/>
+        <param name="max_age" value="0.5"/>
+        <param name="velocity_limit" value="5.0"/>
+        <param name="radius_padding" value="0.1"/>
+    </node>
+
+    <!-- ========== MPC Navigation ========== -->
+    <node pkg="mpc_nav" type="mpc_node.py" name="mpc_node" output="screen">
+        <rosparam command="load" file="$(find mpc_nav)/config/mpc.yaml" />
+    </node>
+
+    <!-- ========== Visualization ========== -->
+    <!-- DOA RViz -->
+    <node pkg="rviz" type="rviz" name="rviz_doa" args="-d $(find umap)/rviz/simulation.rviz" />
+    
+    <!-- MPC RViz (optional, comment out if using single RViz) -->
+    <!-- <node pkg="rviz" type="rviz" name="rviz_mpc" args="-d $(find mpc_nav)/launch/rviz/mpc.rviz" /> -->
+
+</launch>

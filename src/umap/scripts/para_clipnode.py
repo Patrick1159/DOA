@@ -1,4 +1,4 @@
-#!/home/cius/miniconda3/envs/DOA/bin/python3
+#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
 """
 CLIP process node, for parallel processing of images using FastSAM.
 """
@@ -11,7 +11,7 @@ import torch
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from std_msgs.msg import Float32MultiArray
-from umap.msg import BoundingBoxes2D, BoundingBoxes3D, SegmentedImage, MultiImageFeatures, Obstacles
+from umap.msg import BoundingBoxes2D, BoundingBoxes3D, SegmentedImage, MultiImageFeatures, Obstacles, RematchStatistics
 
 from config_manager import ExtractorConfig
 from model_manager import ModelManager
@@ -54,6 +54,8 @@ class ParaClipNode:
         # Publishers
         self.obstacles_pub = rospy.Publisher(
             '/model_output/obstacles_clip', Obstacles, queue_size=10)
+        self.statistics_pub = rospy.Publisher(
+            '/rematch_statistics_clip', RematchStatistics, queue_size=10)
 
         
     def _handle_image_message(self, image_msg):
@@ -99,7 +101,10 @@ class ParaClipNode:
         processing_stats = {
             'clip_time': 0.0,
             'sam_time': 0.0,
-            'processed_count': 0
+            'processed_count': 0,
+            'preprocess_time': 0.0,
+            'postprocess_time': 0.0,
+            'total_time': 0.0,
         }
         
         rospy.loginfo(f"Processing {len(obstacles_msg.box_ids)} obstacles")
@@ -107,19 +112,21 @@ class ParaClipNode:
 
         for i, box_id in enumerate(obstacles_msg.box_ids):
             try:
-                # Convert mask and extract ROI
+                # Convert mask and extract ROI  (preprocess)
+                roi_start = time.time()
                 mask = self.bridge.imgmsg_to_cv2(obstacles_msg.mask[i], "passthrough")
                 masks.append(mask)  # Collect mask for visualization
                 
                 roi = self.image_processor.extract_roi_from_mask(
                     self.current_image, mask, self.config.FOREGROUND_ONLY)
+                processing_stats['preprocess_time'] += time.time() - roi_start
                 
                 # Validate ROI
                 if not self.image_processor.is_valid_roi(roi):
                     rospy.logdebug(f"Invalid ROI for box_id {box_id}")
                     continue
                 
-                # Extract CLIP features
+                # Extract CLIP features  (model inference)
                 if self.config.RUN_CLIP:
                     clip_start_time = time.time()
                     roi_features = self.model_manager.extract_clip_features(
@@ -146,6 +153,9 @@ class ParaClipNode:
         binary_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
         time_end = time.time()
         total_time = time_end - time_start
+        processing_stats['total_time'] = total_time
+        processing_stats['postprocess_time'] = max(
+            0.0, total_time - processing_stats['preprocess_time'] - processing_stats['clip_time'])
         rospy.loginfo(f"Successfully processed {processing_stats['processed_count']} obstacles in {total_time:.3f}s")
 
         return features, valid_rois, masks, processing_stats, binary_mask
@@ -180,10 +190,32 @@ class ParaClipNode:
             # rospy.loginfo(f"binary mask in processed obstacles non zero zones: {np.count_nonzero(processed_obstacles.binary_mask.data)}")
             self.obstacles_pub.publish(processed_obstacles)
             
+            # Publish rematch statistics
+            stats_msg = RematchStatistics()
+            stats_msg.header = obstacles_msg.header
+            stats_msg.node_name = 'clip'
+            n = processing_stats.get('processed_count', 0)
+            stats_msg.obstacle_count = n
+            stats_msg.total_time = processing_stats.get('total_time', 0.0)
+            stats_msg.model_time = processing_stats.get('clip_time', 0.0)
+            stats_msg.preprocess_time = processing_stats.get('preprocess_time', 0.0)
+            stats_msg.postprocess_time = processing_stats.get('postprocess_time', 0.0)
+            stats_msg.avg_model_time_per_obstacle = (
+                stats_msg.model_time / n if n > 0 else 0.0)
+            stats_msg.sync_wait_time = 0.0
+            # end-to-end latency: now - message stamp
+            try:
+                stats_msg.e2e_latency = rospy.Time.now().to_sec() - obstacles_msg.header.stamp.to_sec()
+            except Exception:
+                stats_msg.e2e_latency = 0.0
+            self.statistics_pub.publish(stats_msg)
+
             # Log processing statistics
             rospy.loginfo(
-                f"Published results: {len(features)} features, "
-                f"CLIP: {processing_stats['clip_time']:.3f}s"
+                f"CLIP: total={stats_msg.total_time:.3f}s  "
+                f"model={stats_msg.model_time:.3f}s  "
+                f"pre={stats_msg.preprocess_time:.3f}s  "
+                f"obstacles={n}"
             )
             
         except Exception as e:

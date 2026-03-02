@@ -58,13 +58,13 @@ void DynamicObstacleLayer::reconfigureCB(costmap_2d::GenericPluginConfig &config
   enabled_ = config.enabled;
 }
 
-void DynamicObstacleLayer::trackerCallback(const umap::TrackerDetails::ConstPtr& msg)
+void DynamicObstacleLayer::trackerCallback(const umap::TrackerDetailArray::ConstPtr& msg)
 {
   std::lock_guard<std::mutex> lock(data_mutex_);
   last_tracker_msg_ = msg;
   new_data_received_ = true;
-  // ROS_DEBUG_THROTTLE(2.0, "DynamicObstacleLayer: Received tracker data with %zu obstacles", msg->tracker_ids.size());
-  ROS_INFO_THROTTLE(2.0, "DynamicObstacleLayer: Received tracker data with %zu obstacles", msg->tracker_ids.size());
+  // ROS_DEBUG_THROTTLE(2.0, "DynamicObstacleLayer: Received tracker data with %zu obstacles", msg->trackers.size());
+  ROS_INFO_THROTTLE(2.0, "DynamicObstacleLayer: Received tracker data with %zu obstacles", msg->trackers.size());
 }
 
 void DynamicObstacleLayer::updateBounds(double robot_x, double robot_y, double robot_yaw, double* min_x, double* min_y, double* max_x, double* max_y)
@@ -137,7 +137,7 @@ void DynamicObstacleLayer::updateBounds(double robot_x, double robot_y, double r
   }
 
   // 2. Process new tracker data
-  umap::TrackerDetails::ConstPtr msg;
+  umap::TrackerDetailArray::ConstPtr msg;
   {
     std::lock_guard<std::mutex> lock(data_mutex_);
     if (last_tracker_msg_)
@@ -169,25 +169,25 @@ void DynamicObstacleLayer::updateBounds(double robot_x, double robot_y, double r
       return;
     }
 
-    if (msg->tracker_ids.empty())
+    if (msg->trackers.empty())
     {
         ROS_INFO_THROTTLE(2.0, "DynamicObstacleLayer: Tracker message is empty.");
     }
     else
     {
         ROS_INFO_THROTTLE(2.0, "DynamicObstacleLayer: Processing %zu obstacles. Frame: %s -> %s", 
-            msg->tracker_ids.size(), msg->header.frame_id.c_str(), layered_costmap_->getGlobalFrameID().c_str());
+            msg->trackers.size(), msg->header.frame_id.c_str(), layered_costmap_->getGlobalFrameID().c_str());
     }
 
-    for (size_t i = 0; i < msg->tracker_ids.size(); ++i)
+    for (size_t i = 0; i < msg->trackers.size(); ++i)
     {
       geometry_msgs::PointStamped pt_in, pt_out;
       pt_in.header = msg->header;
-      pt_in.point = msg->positions[i];
+      pt_in.point = msg->trackers[i].position;
       
       geometry_msgs::Vector3Stamped vel_in, vel_out;
       vel_in.header = msg->header;
-      vel_in.vector = msg->velocities[i];
+      vel_in.vector = msg->trackers[i].velocity;
 
       // Transform point
       tf2::doTransform(pt_in, pt_out, transform);
@@ -196,7 +196,7 @@ void DynamicObstacleLayer::updateBounds(double robot_x, double robot_y, double r
       // tf2::doTransform for Vector3Stamped handles rotation
       tf2::doTransform(vel_in, vel_out, transform);
 
-      processObstacle(pt_out.point, vel_out.vector, msg->box_dimensions[i], min_x, min_y, max_x, max_y);
+      processObstacle(pt_out.point, vel_out.vector, msg->trackers[i].box_dimensions, min_x, min_y, max_x, max_y);
     }
   }
 }

@@ -35,7 +35,9 @@ add_message_files(
   SegmentedImage.msg
   MultiImageFeatures.msg
   Obstacles.msg
-  TrackerDetails.msg
+  TrackerDetail.msg
+  TrackerDetailArray.msg
+  RematchStatistics.msg
 )
 
 # Generate messages

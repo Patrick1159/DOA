@@ -6,7 +6,7 @@
 #include <costmap_2d/costmap_layer.h>
 #include <costmap_2d/GenericPluginConfig.h>
 #include <dynamic_reconfigure/server.h>
-#include <umap/TrackerDetails.h>
+#include <umap/TrackerDetailArray.h>
 #include <mutex>
 #include <vector>
 #include <cmath>
@@ -29,7 +29,7 @@ public:
 
 private:
   void reconfigureCB(costmap_2d::GenericPluginConfig &config, uint32_t level);
-  void trackerCallback(const umap::TrackerDetails::ConstPtr& msg);
+  void trackerCallback(const umap::TrackerDetailArray::ConstPtr& msg);
   
   // Helper to update costs for a single obstacle
   void processObstacle(const geometry_msgs::Point& pos, 
@@ -41,7 +41,7 @@ private:
   ros::Subscriber tracker_sub_;
   
   std::mutex data_mutex_;
-  umap::TrackerDetails::ConstPtr last_tracker_msg_;
+  umap::TrackerDetailArray::ConstPtr last_tracker_msg_;
   bool new_data_received_;
 
   // Timestamp grid for decay logic

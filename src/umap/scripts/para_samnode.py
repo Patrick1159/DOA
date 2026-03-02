@@ -1,4 +1,4 @@
-#!/home/cius/miniconda3/envs/DOA/bin/python3
+#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
 """
 Subscribes to dynamic obstacles and image topics, processes ROIs, and publishes results.
 """
@@ -11,7 +11,7 @@ import torch
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from std_msgs.msg import Float32MultiArray
-from umap.msg import BoundingBoxes2D, BoundingBoxes3D, SegmentedImage, MultiImageFeatures, Obstacles
+from umap.msg import BoundingBoxes2D, BoundingBoxes3D, SegmentedImage, MultiImageFeatures, Obstacles, RematchStatistics
 
 from config_manager import ExtractorConfig
 from model_manager import ModelManager
@@ -48,10 +48,10 @@ class PrarSamNode:
         """Setup ROS subscribers and publishers"""
         # Subscribers
         image_topic = rospy.get_param('~image_topic', '/camera/rgb/image_raw')
-        self.image_sub = rospy.Subscriber(image_topic, Image, self._handle_image_message)
+        self.image_sub = rospy.Subscriber(image_topic, Image, self._handle_image_message, queue_size=1)
         
         self.obstacles_sub = rospy.Subscriber(
-                'tracker/dynamic_obstacles', Obstacles, self._process_dynamic_obstacles)
+                'tracker/dynamic_obstacles', Obstacles, self._process_dynamic_obstacles, queue_size=1)
         
         # Publishers
         self.vis_pub = rospy.Publisher(
@@ -64,6 +64,8 @@ class PrarSamNode:
             "/model_output/visualization/mask_debug", Image, queue_size=10)
         self.segmented_image_pub = rospy.Publisher(
             '/model_output/segmented_image', Image, queue_size=10)
+        self.statistics_pub = rospy.Publisher(
+            '/rematch_statistics_sam', RematchStatistics, queue_size=10)
         
     def _handle_image_message(self, image_msg):
         """Handle incoming image messages"""
@@ -117,7 +119,9 @@ class PrarSamNode:
         processing_stats = {
             'clip_time': 0.0,
             'sam_time': 0.0,
-            'processed_count': 0
+            'processed_count': 0,
+            'preprocess_time': 0.0,
+            'postprocess_time': 0.0,
         }
         
         rospy.loginfo(f"Processing {len(obstacles_msg.box_ids)} obstacles")
@@ -168,6 +172,8 @@ class PrarSamNode:
                 rospy.logerr(f"ROI extraction failed for box_id {box_id}: {e}")
                 continue
 
+        processing_stats['preprocess_time'] = time.time() - time_start
+
         # Phase 2: Batch FastSAM processing (GPU parallel)
         sam_results_dict = {}  # box_id -> results mapping
         
@@ -176,7 +182,9 @@ class PrarSamNode:
             batch_box_ids = [data[1] for data in roi_extraction_data]
             
             # Try batch processing first
+            sam_infer_start = time.time()
             batch_results = self.model_manager.run_fastsam_batch(batch_rois, batch_box_ids)
+            processing_stats['sam_time'] = time.time() - sam_infer_start
             
             if batch_results is not None:
                 # Batch processing succeeded
@@ -184,7 +192,6 @@ class PrarSamNode:
                     sam_results_dict[box_id] = results
                     if results is not None and hasattr(results[0], 'masks'):
                         processing_stats['processed_count'] += 1
-                        sam_time = processing_stats['sam_time'] / max(len(batch_results), 1)
                         rospy.logdebug(f"Batch SAM result for box_id {box_id}: {results[0].masks.data.shape[0]} masks")
             else:
                 # Fall back to sequential processing
@@ -255,6 +262,8 @@ class PrarSamNode:
         
         time_end = time.time()
         total_time = time_end - time_start
+        processing_stats['postprocess_time'] = total_time - processing_stats['preprocess_time'] - processing_stats['sam_time']
+        processing_stats['total_time'] = total_time
         rospy.loginfo(f"Successfully processed {processing_stats['processed_count']} obstacles in {total_time:.3f}s")
 
         return features, valid_rois, masks, processing_stats, binary_mask, overlay_image
@@ -394,8 +403,34 @@ class PrarSamNode:
                 obstacles_msg, features, binary_mask)
             self.obstacles_pub.publish(processed_obstacles)
             
+            # 6. Publish rematch statistics
+            stats_msg = RematchStatistics()
+            stats_msg.header = obstacles_msg.header
+            stats_msg.node_name = 'sam'
+            n = processing_stats.get('processed_count', 0)
+            stats_msg.obstacle_count = n
+            stats_msg.total_time = processing_stats.get('total_time', 0.0)
+            stats_msg.model_time = processing_stats.get('sam_time', 0.0)
+            stats_msg.preprocess_time = processing_stats.get('preprocess_time', 0.0)
+            stats_msg.postprocess_time = processing_stats.get('postprocess_time', 0.0)
+            stats_msg.avg_model_time_per_obstacle = (
+                stats_msg.model_time / n if n > 0 else 0.0)
+            stats_msg.sync_wait_time = 0.0
+            # end-to-end latency: now - message stamp
+            try:
+                stats_msg.e2e_latency = rospy.Time.now().to_sec() - obstacles_msg.header.stamp.to_sec()
+            except Exception:
+                stats_msg.e2e_latency = 0.0
+            self.statistics_pub.publish(stats_msg)
+
             # Log performance metrics
-            rospy.loginfo(f"SAM: {processing_stats['sam_time']:.3f}s")
+            rospy.loginfo(
+                f"SAM: total={stats_msg.total_time:.3f}s  "
+                f"model={stats_msg.model_time:.3f}s  "
+                f"pre={stats_msg.preprocess_time:.3f}s  "
+                f"post={stats_msg.postprocess_time:.3f}s  "
+                f"obstacles={n}"
+            )
             
         except Exception as e:
             rospy.logerr(f"Result publishing failed: {e}")
