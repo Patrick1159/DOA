@@ -7,8 +7,8 @@
 using namespace std::chrono;
 
 // Helper: duration between two steady_clock time_points in milliseconds
-static inline float ms_between(const rematchNode::TimePoint& t0,
-                                const rematchNode::TimePoint& t1) {
+static inline float ms_between(const std::chrono::steady_clock::time_point& t0,
+                                const std::chrono::steady_clock::time_point& t1) {
     return static_cast<float>(
         duration_cast<microseconds>(t1 - t0).count()) / 1000.0f;
 }
@@ -311,7 +311,7 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
                                   + IOU_WEIGHT * iou_cost
                                   + DISTANCE_WEIGHT * distance_cost;
                 ROS_INFO_NAMED("Rematch", "\033[1;32m  [MATCH SUCCESS] Tracker %zu <-> Detection %zu: IoU=%.3f, Similarity=%.3f, Distance=%.3f, Cost=%.6f\033[0m",
-                         i, j, iou, cosine_similarity, cost_matrix(i, j));
+                         i, j, iou, cosine_similarity, distance, cost_matrix(i, j));
             }
         }
     }

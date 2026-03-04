@@ -363,6 +363,49 @@ rostopic echo /camera/current_pose
 
 ---
 
+## Rematch Profiler（性能监控）
+
+系统内置 `rematch_profiler.py`，用于订阅 `/rematch_statistics` 并实时打印
+`detailed_match` 各阶段耗时（解析、代价矩阵、关联、更新、可视化、发布等），
+支持滚动窗口统计、超时告警与可选 CSV 导出。
+
+### 订阅话题
+
+| 话题 | 类型 | 说明 |
+|------|------|------|
+| `/rematch_statistics` | `umap/RematchStatistics` | rematch 节点各阶段耗时统计 |
+
+### 快速使用
+
+```bash
+# 直接运行（默认窗口=200帧）
+rosrun umap rematch_profiler.py
+
+# 输出 CSV
+rosrun umap rematch_profiler.py _csv_path:=/tmp/rematch_stats.csv
+
+# 启用实时绘图（需 matplotlib）
+rosrun umap rematch_profiler.py _plot:=true
+```
+
+### 可选参数
+
+| 参数 | 默认 | 说明 |
+|------|------|------|
+| `~window` | 200 | 滚动统计窗口大小 |
+| `~warn_total_ms` | 100.0 | 总耗时告警阈值（ms） |
+| `~csv_path` | "" | CSV 输出路径（空则不输出） |
+| `~plot` | false | 是否实时绘图（需 matplotlib） |
+
+### 输出字段（RematchStatistics）
+
+Profiler 主要使用以下字段（单位 ms）：
+`t_parse_ms`、`t_cost_matrix_ms`、`t_association_ms`、`t_update_ms`、
+`t_publish_vis_ms`、`t_publish_det_ms`、`t_total_ms`，以及
+`num_detections`、`num_trackers`、`num_matched`、`num_unmatched_det`。
+
+---
+
 ## 性能基准（仿真环境）
 
 | 模块 | 频率 | CPU占用 |
