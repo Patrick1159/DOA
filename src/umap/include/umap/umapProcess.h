@@ -66,6 +66,9 @@ public:
 
     void applyGaussianBlur(cv::Mat& hist_matrix);
     UVbox merge_two_UVbox(UVbox father, UVbox son); // A part of generate 2Dbox from histogram(extract_bb)
+    cv::Rect mergeRects(const cv::Rect& first, const cv::Rect& second) const;
+    bool shouldMergeUVBoxes(const cv::Rect& first, const cv::Rect& second) const;
+    void mergeNearbyUVBoxes();
 
     void extract_bb(cv::Mat& hist_matrix);
     

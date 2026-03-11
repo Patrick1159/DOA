@@ -1,0 +1,65 @@
+umap_node:
+  # Processing parameters
+  threshold_point: 0.06 # 0.035 + 5.5
+  threshold_line: 2.5 # 5.0good
+  min_length_line: 40 # 30
+  row_downsample: 1 # useless param
+ 
+  # Depth parameters
+  max_dist: 4500.0 # 及时修改 否则会导致直方图全为0(出现在分母)
+  min_dist: 0.0
+  hist_size: 250 # 250
+  depth_factor: 1000.0 # Real depth = value / depth_factor
+  inverse_depth: false
+  enable_horizontal_merge: true
+  merge_horizontal_gap: 100
+  merge_max_row_gap: 8
+  merge_min_vertical_overlap_ratio: 0.3
+
+  # Camera parameters
+  camera_frame: "d400_depth_optical_frame"
+  camera:
+    fx: 605.3289184570312
+    fy: 603.8843994140625
+    cx: 325.57720947265625
+    cy: 242.66864013671875
+  
+tracker_node:
+  # params for matching
+  DYNAMIC_IOU_THRESHOLD: 0.08 #0为不筛选
+  DYNAMIC_DIST_THRESHOLD: 2.5 # 2.0
+  iou_weight: 0.3
+  dist_weight: 0.7
+
+  UNMATCHED_PUBLISH_TIMEOUT: 0.7 # seconds, how long to keep publishing unmatched dynamic trackers
+  EXPANSION_RATE: 0.5 # per second dimension expansion rate for dynamic trackers
+  MAX_TRACKER_AGE: 0.7 # seconds, max age of a tracker without updates
+  # params for determination of dynamic obstacles
+  DYNAMIC_VELOCITY_THRESHOLD: 0.1
+  DYNAMIC_VELOCITY_MAX: 5.0
+
+  SUSTAINED_VELOCITY_THRESHOLD: 0.1
+  SUSTAINED_VELOCITY_COUNT: 3
+
+  AVERAGE_DEPLACEMENT_THRESHOLD: 0.1
+  HISTORY_SIZE: 5 # History size for pos & vel
+  # params for isDynamic
+  STATUS_HISTORY_SIZE: 5
+  MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3 # 3
+
+  # Visualization frame id
+  COARSE_VIS_FRAME: "d400_depth_optical_frame"
+
+rematch_node:
+  SIMILARITY_THRESHOLD: 0.35 # 0.5
+  SIMILARITY_WEIGHT: 0.5
+
+  IOU_THRESHOLD: 0.1 # set to negative to disabe IOU filtering
+  IOU_WEIGHT: 0.7
+  
+  DISTANCE_THRESHOLD: 2.0 # 1.5
+  DISTANCE_WEIGHT: 0.5
+  MAX_TRACKER_AGE : 5.0 # seconds, max age of a tracker without updates
+  UNMATCHED_PUBLISH_TIMEOUT: 1.0 # seconds, how long to keep publishing unmatched trackers
+  EXPANSION_RATE: 10.0 # per second dimension expansion rate for dynamic trackers
+  REMATCH_VIS_FRAME: "d400_depth_optical_frame"

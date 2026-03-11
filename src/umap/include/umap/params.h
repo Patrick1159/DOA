@@ -15,6 +15,10 @@ struct umapParams {
     int min_length_line = 30;
     int row_downsample = 1; // default 1
     bool inverse_depth = false;  // 控制是否翻转深度图
+    bool enable_horizontal_merge = false;
+    int merge_horizontal_gap = 30;
+    int merge_max_row_gap = 8;
+    float merge_min_vertical_overlap_ratio = 0.3f;
 
     std::string camera_frame = "camera_color_optical_frame"; // default frame id
     float fx = 525.0;

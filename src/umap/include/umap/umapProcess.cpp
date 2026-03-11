@@ -28,6 +28,10 @@ umapProcess::umapProcess() {
     nh_.param("umap_node/threshold_line", params_.threshold_line, 5.0f);
     nh_.param("umap_node/min_length_line", params_.min_length_line, 10);
     nh_.param("umap_node/inverse_depth", params_.inverse_depth, false);
+    nh_.param("umap_node/enable_horizontal_merge", params_.enable_horizontal_merge, false);
+    nh_.param("umap_node/merge_horizontal_gap", params_.merge_horizontal_gap, 30);
+    nh_.param("umap_node/merge_max_row_gap", params_.merge_max_row_gap, 8);
+    nh_.param("umap_node/merge_min_vertical_overlap_ratio", params_.merge_min_vertical_overlap_ratio, 0.3f);
 
     nh_.param("umap_node/camera_frame", params_.camera_frame, std::string("camera_color_optical_frame"));
     nh_.param("umap_node/camera/fx", params_.fx, 525.0f);
@@ -150,6 +154,86 @@ UVbox umapProcess::merge_two_UVbox(UVbox father, UVbox son){
     return father;
 }
 
+cv::Rect umapProcess::mergeRects(const cv::Rect& first, const cv::Rect& second) const {
+    const int left = std::min(first.x, second.x);
+    const int top = std::min(first.y, second.y);
+    const int right = std::max(first.x + first.width, second.x + second.width);
+    const int bottom = std::max(first.y + first.height, second.y + second.height);
+    return cv::Rect(left, top, right - left, bottom - top);
+}
+
+bool umapProcess::shouldMergeUVBoxes(const cv::Rect& first, const cv::Rect& second) const {
+    const int first_right = first.x + first.width;
+    const int second_right = second.x + second.width;
+
+    int horizontal_gap = 0;
+    if (first_right < second.x) {
+        horizontal_gap = second.x - first_right;
+    } else if (second_right < first.x) {
+        horizontal_gap = first.x - second_right;
+    }
+
+    if (horizontal_gap > params_.merge_horizontal_gap) {
+        return false;
+    }
+
+    const int overlap_top = std::max(first.y, second.y);
+    const int overlap_bottom = std::min(first.y + first.height, second.y + second.height);
+    const int overlap_height = std::max(0, overlap_bottom - overlap_top);
+    const int min_height = std::max(1, std::min(first.height, second.height));
+    const float vertical_overlap_ratio = static_cast<float>(overlap_height) / static_cast<float>(min_height);
+
+    const float first_center_y = first.y + first.height * 0.5f;
+    const float second_center_y = second.y + second.height * 0.5f;
+    const float center_row_gap = std::abs(first_center_y - second_center_y);
+
+    return vertical_overlap_ratio >= params_.merge_min_vertical_overlap_ratio ||
+           center_row_gap <= params_.merge_max_row_gap;
+}
+
+void umapProcess::mergeNearbyUVBoxes() {
+    if (bounding_box_U.size() < 2) {
+        return;
+    }
+
+    bool merged_in_pass = true;
+    while (merged_in_pass) {
+        merged_in_pass = false;
+        std::vector<cv::Rect> merged_boxes;
+        std::vector<bool> consumed(bounding_box_U.size(), false);
+
+        for (size_t i = 0; i < bounding_box_U.size(); ++i) {
+            if (consumed[i]) {
+                continue;
+            }
+
+            cv::Rect current = bounding_box_U[i];
+            consumed[i] = true;
+
+            bool expanded = true;
+            while (expanded) {
+                expanded = false;
+                for (size_t j = i + 1; j < bounding_box_U.size(); ++j) {
+                    if (consumed[j]) {
+                        continue;
+                    }
+
+                    if (shouldMergeUVBoxes(current, bounding_box_U[j])) {
+                        current = mergeRects(current, bounding_box_U[j]);
+                        consumed[j] = true;
+                        merged_in_pass = true;
+                        expanded = true;
+                    }
+                }
+            }
+
+            merged_boxes.push_back(current);
+        }
+
+        bounding_box_U = merged_boxes;
+    }
+}
+
 /// @brief Extract bounding boxes from HISTOGRAM matrix, store in class variable bounding_box_U
 /// @param hist_matrix
 void umapProcess::extract_bb(cv::Mat& hist_matrix){
@@ -250,6 +334,10 @@ void umapProcess::extract_bb(cv::Mat& hist_matrix){
                     // printf("bbox_U [b] %d",UVboxes[b].bb.tl().y);
                 }
             }
+        }
+
+        if (params_.enable_horizontal_merge) {
+            mergeNearbyUVBoxes();
         }
     }
 

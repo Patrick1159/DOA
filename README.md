@@ -116,6 +116,60 @@ pointcloud_generate:
     grid_size: 0.05         # 体素滤波格子大小
 ```
 
+### UMAP 近距离聚类增强参数（`config/experiment.yaml` / `config/real_config.yaml`）
+
+当目标距离 D435 很近时，同一个人可能在 U-map 中被切成左右两个峰（典型是双腿）。
+现在 `umapProcess` 在 `extract_bb()` 结束后增加了一层“横向近邻合并”，会在深度层相近时，把左右间距较小的 `bounding_box_U` 合并成一个 obstacle。
+
+```yaml
+umap_node:
+  threshold_point: 0.06
+  threshold_line: 2.5
+  min_length_line: 40
+  hist_size: 250
+
+  enable_horizontal_merge: true
+  merge_horizontal_gap: 100
+  merge_max_row_gap: 8
+  merge_min_vertical_overlap_ratio: 0.3
+```
+
+**新增参数说明：**
+
+- `enable_horizontal_merge`
+  - 是否启用横向近邻合并。
+  - 建议真机场景开启。
+
+- `merge_horizontal_gap`
+  - 两个 U-map 框在 x 方向允许的最大间距（像素列）。
+  - 值越大，越容易把“双腿”合成一个障碍物。
+  - 过大时也更容易把两个并排的人误合并。
+
+- `merge_max_row_gap`
+  - 两个框在 U-map 深度 bin 方向允许的最大中心差。
+  - 用于容忍少量上下错层。
+
+- `merge_min_vertical_overlap_ratio`
+  - 两个框在深度 bin 方向的最小重叠比例。
+  - 值越大，合并越保守。
+
+**推荐调参顺序：**
+
+1. 先调 `merge_horizontal_gap`
+   - 近距离双腿仍分裂：增大到 `40 ~ 100`
+   - 误合并明显：减小到 `20 ~ 40`
+2. 再调 `merge_min_vertical_overlap_ratio`
+   - 误合并多：提高到 `0.4 ~ 0.5`
+   - 想更容易合并：降低到 `0.2 ~ 0.3`
+3. 最后微调 `merge_max_row_gap`
+   - 一般 `6 ~ 12` 足够
+
+**和原始聚类参数的配合建议：**
+
+- 想让双腿更容易先连成块：适当降低 `threshold_point` / `threshold_line`
+- 想减少小噪声误合并：适当提高 `min_length_line`
+- 若深度分箱太细导致近距离目标碎裂，可适当减小 `hist_size`
+
 ---
 
 ## 话题接口
