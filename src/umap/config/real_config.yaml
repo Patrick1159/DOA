@@ -34,6 +34,8 @@ tracker_node:
   # params for isDynamic
   STATUS_HISTORY_SIZE: 10
   MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3
+  FORCE_DYNAMIC: false
+  COARSE_VIS_FRAME: "odom"
 
 rematch_node:
   SIMILARITY_THRESHOLD: 0.72
@@ -44,3 +46,4 @@ rematch_node:
   
   VELOCITY_DIFF_THRESHOLD: 0.5
   VELOCITY_DIFF_WEIGHT: 0.5
+  REMATCH_VIS_FRAME: "odom"

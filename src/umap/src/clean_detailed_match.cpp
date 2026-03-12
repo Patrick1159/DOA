@@ -3,6 +3,7 @@
 #include <umap/rematch.h>
 #include <munkres/munkres.h>
 #include <numeric>           // For std::inner_product
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 using namespace std::chrono;
 
@@ -13,7 +14,7 @@ static inline float ms_between(const rematchNode::TimePoint& t0,
         duration_cast<microseconds>(t1 - t0).count()) / 1000.0f;
 }
 
-rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh)
+rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh), tf_listener_(tf_buffer_)
 {
     obstacles_sub_ = nh_.subscribe("/model_output/obstacles", 10, &rematchNode::obstacles2Tracker, this);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualization/tracked_obstacles", 10);
@@ -28,7 +29,7 @@ rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh)
     nh_.param("rematch_node/IOU_WEIGHT", rematch_params_.IOU_WEIGHT, 0.5);
     nh_.param("rematch_node/DISTANCE_THRESHOLD", rematch_params_.DISTANCE_THRESHOLD, 0.1);
     nh_.param("rematch_node/DISTANCE_WEIGHT", rematch_params_.DISTANCE_WEIGHT, 0.5);
-    nh_.param("rematch_node/REMATCH_VIS_FRAME", rematch_params_.REMATCH_VIS_FRAME, std::string("camera_color_optical_frame"));
+    nh_.param("rematch_node/REMATCH_VIS_FRAME", rematch_params_.REMATCH_VIS_FRAME, rematch_params_.REMATCH_VIS_FRAME);
     nh_.param("rematch_node/MAX_TRACKER_AGE", rematch_params_.MAX_TRACKER_AGE, 0.0);
     nh_.param("rematch_node/UNMATCHED_PUBLISH_TIMEOUT", rematch_params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5);
     nh_.param("rematch_node/EXPANSION_RATE", rematch_params_.EXPANSION_RATE, 0.3);
@@ -50,6 +51,22 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
     tp_cb_start_ = std::chrono::steady_clock::now();
 
     curr_obstacles_raw_ = dync_obstacle_msg;
+
+    const std::string source_frame = dync_obstacle_msg.header.frame_id.empty() ? rematch_params_.REMATCH_VIS_FRAME : dync_obstacle_msg.header.frame_id;
+    const bool need_transform = (source_frame != rematch_params_.REMATCH_VIS_FRAME);
+    geometry_msgs::TransformStamped source_to_tracking_tf;
+    if (need_transform) {
+        try {
+            source_to_tracking_tf = tf_buffer_.lookupTransform(
+                rematch_params_.REMATCH_VIS_FRAME,
+                source_frame,
+                dync_obstacle_msg.header.stamp,
+                ros::Duration(0.05));
+        } catch (const tf2::TransformException& ex) {
+            ROS_WARN_THROTTLE(1.0, "[Rematch] Failed to transform detections from %s to %s: %s. Falling back to raw measurements.",
+                              source_frame.c_str(), rematch_params_.REMATCH_VIS_FRAME.c_str(), ex.what());
+        }
+    }
 
     ROS_INFO("[Rematch] msg sizes -- box_ids:%zu centroid_x:%zu centroid_y:%zu centroid_z:%zu width:%zu height:%zu thickness:%zu box_w:%zu box_h:%zu features:%zu", 
              dync_obstacle_msg.box_ids.size(), dync_obstacle_msg.centroid_x.size(), dync_obstacle_msg.centroid_y.size(), dync_obstacle_msg.centroid_z.size(),
@@ -96,6 +113,19 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
         // Get centroids
         Eigen::Vector3d centroid_measurement;
         centroid_measurement << dync_obstacle_msg.centroid_x[i], dync_obstacle_msg.centroid_y[i], dync_obstacle_msg.centroid_z[i];
+
+        if (need_transform && !source_to_tracking_tf.header.frame_id.empty()) {
+            geometry_msgs::PointStamped point_in;
+            geometry_msgs::PointStamped point_out;
+            point_in.header = dync_obstacle_msg.header;
+            point_in.header.frame_id = source_frame;
+            point_in.point.x = centroid_measurement.x();
+            point_in.point.y = centroid_measurement.y();
+            point_in.point.z = centroid_measurement.z();
+            tf2::doTransform(point_in, point_out, source_to_tracking_tf);
+            centroid_measurement << point_out.point.x, point_out.point.y, point_out.point.z;
+        }
+
         centroid_measurements.push_back(centroid_measurement);
 
         // Get dimensions

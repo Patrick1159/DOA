@@ -42,9 +42,10 @@ tracker_node:
   # params for isDynamic
   STATUS_HISTORY_SIZE: 10
   MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3 # 3
+  FORCE_DYNAMIC: false
 
   # Visualization frame id
-  COARSE_VIS_FRAME: "d400_depth_optical_frame"
+  COARSE_VIS_FRAME: "odom"
 
 rematch_node:
   SIMILARITY_THRESHOLD: 0.5
@@ -58,4 +59,4 @@ rematch_node:
   MAX_TRACKER_AGE : 10.0 # seconds, max age of a tracker without updates
   UNMATCHED_PUBLISH_TIMEOUT: 2.5 # seconds, how long to keep publishing unmatched trackers
   EXPANSION_RATE: 100.0 # per second dimension expansion rate for dynamic trackers
-  REMATCH_VIS_FRAME: "d400_depth_optical_frame"
+  REMATCH_VIS_FRAME: "odom"

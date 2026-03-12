@@ -3,6 +3,7 @@
 #include <umap/coarse_match.h> 
 #include <umap/utils.h>
 #include <munkres/munkres.h> // Include Munkres header
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 using namespace std::chrono;
 
@@ -10,7 +11,7 @@ std::map<int, std::vector<int>> invalid_match_mapping_; // For storing invalid m
 
 /// @brief Constructor for the trackerNode class.
 /// @param nh 
-trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh) {
+trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh), tf_listener_(tf_buffer_) {
     // Subscribe to hardware bounding boxes
     boxes3D_sub_ = nh_.subscribe("/umap/3D_bounding_boxes", 10, &trackerNode::boxes3DCallback, this);
     boxes2D_sub_ = nh_.subscribe("/umap/2D_bounding_boxes", 10, &trackerNode::boxes2DCallback, this);
@@ -36,12 +37,13 @@ trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh) {
     nh_.param("tracker_node/HISTORY_SIZE", params_.HISTORY_SIZE, 10); // control the length of history_pos and history_vel
     nh_.param("tracker_node/STATUS_HISTORY_SIZE", params_.STATUS_HISTORY_SIZE, 10); // control the length of status
     nh_.param("tracker_node/MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE", params_.MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE, 3); // control the length of status
+    nh_.param("tracker_node/FORCE_DYNAMIC", params_.FORCE_DYNAMIC, false);
     nh_.param("tracker_node/MAX_TRACKER_AGE", params_.MAX_TRACKER_AGE, 1.0); // seconds
     nh_.param("tracker_node/UNMATCHED_PUBLISH_TIMEOUT", params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5); // seconds, independent of MAX_TRACKER_AGE
     nh_.param("tracker_node/EXPANSION_RATE", params_.EXPANSION_RATE, 0.3); // per second dimension expansion rate for dynamic trackers
 
     // Visualization param
-    nh_.param("tracker_node/COARSE_VIS_FRAME", params_.COARSE_VIS_FRAME, std::string("camera_color_optical_frame"));
+    nh_.param("tracker_node/COARSE_VIS_FRAME", params_.COARSE_VIS_FRAME, params_.COARSE_VIS_FRAME);
     ROS_INFO("[Tracker] Node initialized");
 }
 
@@ -55,6 +57,22 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     ROS_DEBUG_NAMED("Coarse tracker", "\n\n========== [Tracker] New Frame ==========");
     curr_boxes3D_raw_ = boxes3D_msg; // Store raw 3D boxes from message
 
+    const std::string source_frame = boxes3D_msg.header.frame_id.empty() ? params_.COARSE_VIS_FRAME : boxes3D_msg.header.frame_id;
+    const bool need_transform = (source_frame != params_.COARSE_VIS_FRAME);
+    geometry_msgs::TransformStamped source_to_tracking_tf;
+    if (need_transform) {
+        try {
+            source_to_tracking_tf = tf_buffer_.lookupTransform(
+                params_.COARSE_VIS_FRAME,
+                source_frame,
+                boxes3D_msg.header.stamp,
+                ros::Duration(0.05));
+        } catch (const tf2::TransformException& ex) {
+            ROS_WARN_THROTTLE(1.0, "[Coarse tracker] Failed to transform detections from %s to %s: %s. Falling back to raw measurements.",
+                              source_frame.c_str(), params_.COARSE_VIS_FRAME.c_str(), ex.what());
+        }
+    }
+
     // 0. Extract 3D bounding boxes from the message
     std::vector<Eigen::Vector3d> measurements;
     std::vector<Eigen::Vector3d> sizes; // box dimensions
@@ -63,6 +81,19 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     for (size_t i = 0; i < boxes3D_msg.box_ids.size(); i++) {
         Eigen::Vector3d measurement, size;
         measurement << boxes3D_msg.x[i], boxes3D_msg.y[i], boxes3D_msg.z[i];
+
+        if (need_transform && !source_to_tracking_tf.header.frame_id.empty()) {
+            geometry_msgs::PointStamped point_in;
+            geometry_msgs::PointStamped point_out;
+            point_in.header = boxes3D_msg.header;
+            point_in.header.frame_id = source_frame;
+            point_in.point.x = measurement.x();
+            point_in.point.y = measurement.y();
+            point_in.point.z = measurement.z();
+            tf2::doTransform(point_in, point_out, source_to_tracking_tf);
+            measurement << point_out.point.x, point_out.point.y, point_out.point.z;
+        }
+
         measurements.push_back(measurement);
         
         size << boxes3D_msg.width[i], boxes3D_msg.height[i], boxes3D_msg.thickness[i]; // width, height, thickness
@@ -103,16 +134,21 @@ void trackerNode::boxes2DCallback(const umap::BoundingBoxes2D& boxes2D_msg) {
 /// @brief Check if the tracker is dynamic.
 /// @param tracker: ObstacleTracker object
 bool trackerNode::isDynamicTracker(onboardDetector::ObstacleTracker& tracker) const {
+    if (params_.FORCE_DYNAMIC && tracker.dynamic_status_locked) {
+        tracker.isDynamic = true;
+        return true;
+    }
+
     auto state = tracker.getState();
     double velocity = state.velocity.norm();
     double avg_movement = 0.0;
 
-    // 1. Average movement over history
-    if (!tracker.history_pos.empty()) {
-        for (const auto& pos : tracker.history_pos) {
-            avg_movement += pos.norm();
+    // 1. Average frame-to-frame movement over history
+    if (tracker.history_pos.size() >= 2) {
+        for (size_t i = 1; i < tracker.history_pos.size(); ++i) {
+            avg_movement += (tracker.history_pos[i] - tracker.history_pos[i - 1]).norm();
         }
-        avg_movement /= tracker.history_pos.size();
+        avg_movement /= static_cast<double>(tracker.history_pos.size() - 1);
     }
 
     // 2. Check sustained velocity over n frames
@@ -218,9 +254,14 @@ bool trackerNode::isDynamicTracker(onboardDetector::ObstacleTracker& tracker) co
         // If either dynamic or static status is consistent for the required number of frames, finalize it
         if (consecutive_dynamic_count >= params_.MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE) {
             tracker.isDynamic = true;
+            if (params_.FORCE_DYNAMIC) {
+                tracker.dynamic_status_locked = true;
+            }
             break;
         } else if (consecutive_static_count >= params_.MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE) {
-            tracker.isDynamic = false;
+            if (!tracker.dynamic_status_locked) {
+                tracker.isDynamic = false;
+            }
             break;
         }
     }
@@ -240,7 +281,7 @@ bool trackerNode::isDynamicTracker(onboardDetector::ObstacleTracker& tracker) co
     //              tracker.history_vel[i].norm());
     // }
     
-    return isDynamic;
+    return tracker.isDynamic;
 }
 
 /// @brief Get Munkres cost matrix between trackers and measurements.

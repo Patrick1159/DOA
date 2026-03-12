@@ -16,6 +16,8 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 #include <std_msgs/ColorRGBA.h>
 
 class rematchNode{
@@ -63,6 +65,9 @@ private:
     std::map<int, std::vector<geometry_msgs::PoseStamped>> tracker_paths_; // Store historical positions for each tracker
     const size_t max_path_length_ = 100; // Maximum number of historical positions to store
     std::set<int> last_tracker_ids_;
+
+    tf2_ros::Buffer tf_buffer_;
+    tf2_ros::TransformListener tf_listener_;
 
     void matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureFeature>& curr_obstacles);
     std::vector<Eigen::Vector3d> getNextKFrameState(const onboardDetector::ObstacleTracker& tracker, int K);

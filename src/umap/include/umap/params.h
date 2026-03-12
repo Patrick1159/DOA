@@ -37,11 +37,12 @@ struct trackerParams{
     double UNMATCHED_PUBLISH_TIMEOUT; // seconds, how long to keep publishing unmatched dynamic trackers
     double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
     
-    std::string COARSE_VIS_FRAME = "camera_color_optical_frame"; // default frame id
+    std::string COARSE_VIS_FRAME = "odom"; // default tracking / visualization frame id
     double AVERAGE_DEPLACEMENT_THRESHOLD; // m threshold for average displacement of a tracker
     int HISTORY_SIZE; // 每个tracker的历史vel和pos留存长度
     int STATUS_HISTORY_SIZE; // 每个tracker的历史STATUS留存长度
     int MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE; // tracker改变状态所需要的最小稳定帧, <= STATUS_HISTORY_SIZE!
+    bool FORCE_DYNAMIC = false; // once locked as dynamic, keep dynamic until tracker is removed
 };
 
 struct rematchParams{
@@ -58,7 +59,7 @@ struct rematchParams{
     double UNMATCHED_PUBLISH_TIMEOUT; // seconds, how long to keep publishing unmatched trackers
     double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
 
-    std::string REMATCH_VIS_FRAME = "camera_color_optical_frame";
+    std::string REMATCH_VIS_FRAME = "odom";
 };
 
 #endif // UMAP_PARAMS_H

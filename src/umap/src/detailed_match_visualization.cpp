@@ -81,15 +81,15 @@ void rematchNode::addBoundingBoxEdges(
 
 // Helper function: Calculate average movement from history
 double rematchNode::calculateAverageMovement(const std::vector<Eigen::Vector3d>& history) const {
-    if (history.empty()) {
+    if (history.size() < 2) {
         return 0.0;
     }
     
     double total_movement = 0.0;
-    for (const auto& movement : history) {
-        total_movement += movement.norm();
+    for (size_t i = 1; i < history.size(); ++i) {
+        total_movement += (history[i] - history[i - 1]).norm();
     }
-    return total_movement / history.size();
+    return total_movement / static_cast<double>(history.size() - 1);
 }
 
 // Helper function: Create obstacle bounding box marker

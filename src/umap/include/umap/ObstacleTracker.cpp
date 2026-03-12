@@ -25,7 +25,7 @@
 
 namespace onboardDetector {
 
-ObstacleTracker::ObstacleTracker() : initialized(false), dt(0.1), track_id(0), lastUpdateTime(0.0), was_dimension_expanded(false) {}
+ObstacleTracker::ObstacleTracker() : initialized(false), dt(0.1), track_id(0), lastUpdateTime(0.0), was_dimension_expanded(false), dynamic_status_locked(false) {}
 
 void ObstacleTracker::initializeKalmanFilter() {
     const int state_size = 6;  // [x, y, z, vx, vy, vz]
@@ -83,8 +83,9 @@ void ObstacleTracker::init(const Eigen::Vector3d& initial_pos, const Eigen::Vect
     original_box_dimensions = bounding_box_size; // store original dimensions
     history_pos.push_back(initial_pos); // Store position history
     history_vel.push_back(Eigen::Vector3d::Zero()); // Initialize velocity history
-    isDynamic = true; // Initialize as dynamic
+    isDynamic = false; // Initialize as non-dynamic until enough evidence is collected
     was_dimension_expanded = false; // Initialize dimension expansion flag
+    dynamic_status_locked = false;
     initialized = true;
 }
 
@@ -102,8 +103,9 @@ void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const 
     lastUpdateTime = timestamp;
     history_pos.push_back(initial_pos); // Store position history
     history_vel.push_back(Eigen::Vector3d::Zero()); // Initialize velocity history
-    isDynamic = true; // Initialize as dynamic
+    isDynamic = false; // Initialize as non-dynamic until enough evidence is collected
     was_dimension_expanded = false; // Initialize dimension expansion flag
+    dynamic_status_locked = false;
     initialized = true;
     update_count = 1; // Initialize update count
 }

@@ -60,10 +60,9 @@ void trackerNode::publishVisualization() {
 
             auto state = trackers_[tracker_index].getState();
 
-            // Convert to camera frame coordinates
-            marker.pose.position.x = state.position.z();
-            marker.pose.position.y = -state.position.x();
-            marker.pose.position.z = -state.position.y();
+            marker.pose.position.x = state.position.x();
+            marker.pose.position.y = state.position.y();
+            marker.pose.position.z = state.position.z();
 
             // Set marker size using current measurement size
             if (measurement_id < curr_sizes_.size()) {
@@ -184,9 +183,9 @@ void trackerNode::publishVisualization() {
             text_marker.action = visualization_msgs::Marker::ADD;
 
             // position equals cube pose position with height offset
-            text_marker.pose.position.x = state.position.z();
-            text_marker.pose.position.y = -state.position.x();
-            text_marker.pose.position.z = -state.position.y() + 0.5; // Offset for text height
+            text_marker.pose.position.x = state.position.x();
+            text_marker.pose.position.y = state.position.y();
+            text_marker.pose.position.z = state.position.z() + 0.5; // Offset for text height
             text_marker.scale.z = 0.1; // Font size 
 
             // Calculate average movement
@@ -249,9 +248,9 @@ void trackerNode::publishVisualization() {
 
             // Construct obstacles_msg using current measurement
             obstacles_msg.box_ids.push_back(tracker_id);
-            obstacles_msg.centroid_x.push_back(state.position.z());
-            obstacles_msg.centroid_y.push_back(-state.position.x());
-            obstacles_msg.centroid_z.push_back(-state.position.y());
+            obstacles_msg.centroid_x.push_back(state.position.x());
+            obstacles_msg.centroid_y.push_back(state.position.y());
+            obstacles_msg.centroid_z.push_back(state.position.z());
             obstacles_msg.width.push_back(curr_sizes_[measurement_id][2]);
             obstacles_msg.height.push_back(curr_sizes_[measurement_id][0]);
             obstacles_msg.thickness.push_back(curr_sizes_[measurement_id][1]);
@@ -274,9 +273,9 @@ void trackerNode::publishVisualization() {
 
                 pose_stamped.header.frame_id = kFrameId;
                 pose_stamped.header.stamp = current_time;
-                pose_stamped.pose.position.x = pos.z(); // z
-                pose_stamped.pose.position.y = -pos.x(); // x
-                pose_stamped.pose.position.z = -pos.y(); // y
+                pose_stamped.pose.position.x = pos.x();
+                pose_stamped.pose.position.y = pos.y();
+                pose_stamped.pose.position.z = pos.z();
 
                 // default identity orientation
                 pose_stamped.pose.orientation.x = 0.0;
@@ -317,9 +316,9 @@ void trackerNode::publishVisualization() {
             }
 
             obstacles_msg.box_ids.push_back(tracker_id);
-            obstacles_msg.centroid_x.push_back(state.position.z());
-            obstacles_msg.centroid_y.push_back(-state.position.x());
-            obstacles_msg.centroid_z.push_back(-state.position.y());
+            obstacles_msg.centroid_x.push_back(state.position.x());
+            obstacles_msg.centroid_y.push_back(state.position.y());
+            obstacles_msg.centroid_z.push_back(state.position.z());
             // Maintain the same dimension ordering as matched case
             const Eigen::Vector3d& sz = size3d_it->second; // [width, height, thickness]
             obstacles_msg.width.push_back(sz[2]);
@@ -345,9 +344,9 @@ void trackerNode::publishVisualization() {
 
                 pose_stamped.header.frame_id = kFrameId;
                 pose_stamped.header.stamp = current_time;
-                pose_stamped.pose.position.x = pos.z(); // z
-                pose_stamped.pose.position.y = -pos.x(); // x
-                pose_stamped.pose.position.z = -pos.y(); // y
+                pose_stamped.pose.position.x = pos.x();
+                pose_stamped.pose.position.y = pos.y();
+                pose_stamped.pose.position.z = pos.z();
 
                 // default identity orientation
                 pose_stamped.pose.orientation.x = 0.0;

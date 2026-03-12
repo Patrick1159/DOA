@@ -13,6 +13,8 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 #include <std_msgs/ColorRGBA.h>
 #include <array>
 
@@ -65,6 +67,9 @@ private:
     std::map<int, sensor_msgs::Image> last_mask_by_tracker_;
     std::map<int, std::array<int,4>> last_box2d_by_tracker_; // x,y,width,height
     std::map<int, Eigen::Vector3d> last_size3d_by_tracker_; // width, height, thickness
+
+    tf2_ros::Buffer tf_buffer_;
+    tf2_ros::TransformListener tf_listener_;
 
     Eigen::MatrixXd getCost_matrix(vector<onboardDetector::ObstacleTracker>& trackers, const vector<Eigen::Vector3d>& measurements, const vector<Eigen::Vector3d>& bbox_sizes, 
         const double iou_threshold, const double dist_threshold,

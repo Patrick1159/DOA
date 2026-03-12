@@ -59,6 +59,7 @@ public:
     Eigen::Vector3d original_box_dimensions; // Original dimensions when last observed
     int update_count; // Number of updates received
     bool was_dimension_expanded; // Flag to track if tracker was updated with dimension expansion
+    bool dynamic_status_locked; // Keep dynamic status latched until tracker is removed
 };
 
 }  // namespace onboardDetector
