@@ -26,3 +26,16 @@ float32 sync_wait_time
 
 # 消息端到端延迟：当前时间 - message.header.stamp (s)
 float32 e2e_latency
+
+# rematch 节点专用统计 (单位: ms)
+int32 num_detections
+int32 num_trackers
+int32 num_matched
+int32 num_unmatched_det
+float32 t_parse_ms
+float32 t_cost_matrix_ms
+float32 t_association_ms
+float32 t_update_ms
+float32 t_publish_vis_ms
+float32 t_publish_det_ms
+float32 t_total_ms

@@ -1,3 +1,5 @@
+#!/home/patrick/miniconda3/envs/fastsam/bin/python3
+
 import rospy
 import torch
 import clip
@@ -5,6 +7,7 @@ import cv2
 import PIL
 import sys
 import time
+import os
 from config_manager import ExtractorConfig
 import numpy as np
 
@@ -23,6 +26,10 @@ class ModelManager:
         """Initialize CLIP and FastSAM models"""
         try:
             rospy.loginfo(f"Initializing models on device: {self.device}")
+
+            # PyTorch 2.6 changed torch.load default to weights_only=True, which
+            # can break Ultralytics/FastSAM checkpoint loading.
+            self._configure_torch_checkpoint_loading()
             
             # Initialize FastSAM
             self.fastsam_model = FastSAM(self.config.FASTSAM_WEIGHTS_PATH)
@@ -36,6 +43,33 @@ class ModelManager:
         except Exception as e:
             rospy.logerr(f"Failed to initialize models: {e}")
             raise
+
+    def _configure_torch_checkpoint_loading(self):
+        """Configure compatibility for trusted FastSAM checkpoints on PyTorch >=2.6."""
+        try:
+            # If FastSAM uses torch.load without explicit weights_only, force old behavior.
+            # Use this only for trusted local checkpoints.
+            os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+
+            # Allowlist common Ultralytics model classes for weights_only loading path.
+            from ultralytics.nn.tasks import (
+                BaseModel,
+                ClassificationModel,
+                DetectionModel,
+                SegmentationModel,
+                PoseModel,
+                OBBModel,
+            )
+            torch.serialization.add_safe_globals([
+                BaseModel,
+                ClassificationModel,
+                DetectionModel,
+                SegmentationModel,
+                PoseModel,
+                OBBModel,
+            ])
+        except Exception as e:
+            rospy.logwarn(f"Torch checkpoint compatibility setup skipped: {e}")
     
     def extract_clip_features(self, image, boost=True):
         """Extract CLIP features from image"""
@@ -79,7 +113,7 @@ class ModelManager:
             return None
     
     def run_fastsam_batch(self, rois, box_ids):
-        """Run FastSAM segmentation on multiple ROIs in TRUE batch mode (GPU parallel)
+        """Run FastSAM segmentation on multiple ROIs with batch-first strategy.
         
         Args:
             rois: List of ROI images (numpy arrays)
@@ -99,7 +133,7 @@ class ModelManager:
             rospy.loginfo(f"TRUE Batch FastSAM: Processing {len(rois)} ROIs with batch_size={batch_size}")
             batch_start_time = time.time()
             
-            # Process ROIs in batches (TRUE PARALLEL PROCESSING)
+            # Process ROIs in chunks. For each chunk, try one FastSAM batch call.
             for batch_idx in range(0, len(rois), batch_size):
                 batch_end = min(batch_idx + batch_size, len(rois))
                 batch_rois = rois[batch_idx:batch_end]
@@ -107,45 +141,50 @@ class ModelManager:
                 
                 rospy.loginfo(f"Processing batch {batch_idx // batch_size + 1}: ROIs {batch_idx}-{batch_end}")
                 
-                # **CRITICAL FIX**: Resize all ROIs to same size for batching
+                # Resize ROIs to same size for batched inference.
                 target_size = self.config.SAM_IMAGE_SIZE
                 resized_rois = []
-                original_shapes = []
                 
                 for roi in batch_rois:
-                    original_shapes.append(roi.shape[:2])
-                    # Resize to target size (FastSAM requirement)
                     resized_roi = cv2.resize(roi, (target_size, target_size))
                     resized_rois.append(resized_roi)
                 
-                # **TRUE BATCH PROCESSING**: Stack images and process together
                 batch_start = time.time()
                 try:
-                    # Stack images into batch tensor (B, H, W, C)
-                    stacked_images = np.stack(resized_rois, axis=0)
-                    
-                    # Run FastSAM on the ENTIRE batch at once
-                    # Note: FastSAM processes images one by one internally, but we prepare them efficiently
-                    batch_sam_results = []
-                    for idx, (roi, box_id) in enumerate(zip(resized_rois, batch_box_ids)):
-                        results = self.fastsam_model(
-                            roi,
-                            device=self.device,
-                            retina_masks=True,
-                            conf=self.config.SAM_CONFIDENCE,
-                            iou=self.config.SAM_IOU,
-                            imgsz=target_size
+                    # True batch attempt: single model invocation for the chunk.
+                    batched_results = self.fastsam_model(
+                        resized_rois,
+                        device=self.device,
+                        retina_masks=True,
+                        conf=self.config.SAM_CONFIDENCE,
+                        iou=self.config.SAM_IOU,
+                        imgsz=target_size,
+                    )
+
+                    if not isinstance(batched_results, list):
+                        batched_results = [batched_results]
+
+                    if len(batched_results) != len(batch_box_ids):
+                        raise RuntimeError(
+                            f"Unexpected batch output size: got {len(batched_results)}, "
+                            f"expected {len(batch_box_ids)}"
                         )
-                        batch_sam_results.append((box_id, results))
+
+                    batch_sam_results = [
+                        (box_id, [results])
+                        for box_id, results in zip(batch_box_ids, batched_results)
+                    ]
                     
                     batch_time = time.time() - batch_start
-                    rospy.loginfo(f"Batch {batch_idx // batch_size + 1} processed in {batch_time:.3f}s "
-                                 f"({batch_time / len(batch_rois):.3f}s per ROI)")
+                    rospy.loginfo(
+                        f"Batch {batch_idx // batch_size + 1} true-batched in {batch_time:.3f}s "
+                        f"({batch_time / len(batch_rois):.3f}s per ROI)"
+                    )
                     
                     batch_results.extend(batch_sam_results)
                     
                 except Exception as e:
-                    rospy.logerr(f"Batch processing failed: {e}, falling back to sequential")
+                    rospy.logwarn(f"True batch processing failed: {e}, falling back to sequential")
                     # Fallback: process individually
                     for roi, box_id in zip(batch_rois, batch_box_ids):
                         try:

@@ -28,6 +28,8 @@ umapProcess::umapProcess() {
     nh_.param("umap_node/threshold_line", params_.threshold_line, 5.0f);
     nh_.param("umap_node/min_length_line", params_.min_length_line, 10);
     nh_.param("umap_node/inverse_depth", params_.inverse_depth, false);
+    nh_.param("umap_node/ignore_bottom_rows", params_.ignore_bottom_rows, 0);
+    nh_.param("umap_node/min_bbox_height_px", params_.min_bbox_height_px, 8);
 
     nh_.param("umap_node/camera_frame", params_.camera_frame, std::string("camera_color_optical_frame"));
     nh_.param("umap_node/camera/fx", params_.fx, 525.0f);
@@ -281,10 +283,12 @@ void umapProcess::extract_2DboxRGB(const ros::Time& stamp, const cv::Mat& depth_
         int y_up = current_rgb_.rows, y_down = 0;
         int x_start = std::max(0, bb_U.x);
         int x_end = std::min(current_rgb_.cols, bb_U.x + bb_U.width);
+        const int y_start = 0;
+        const int y_end = std::max(0, std::min(current_rgb_.rows, current_rgb_.rows - params_.ignore_bottom_rows));
 
         if (x_start < depth_val.cols && x_end > 0) {
             for(int i = x_start; i < x_end; i++) {
-                for(int j = 0; j < current_rgb_.rows && j < depth_val.rows; j++) {
+                for(int j = y_start; j < y_end && j < depth_val.rows; j++) {
                     if (i < depth_val.cols) {
                         float depth = depth_val.at<float>(j, i);
                         if (std::isfinite(depth) && depth >= depth_in_near && depth <= depth_in_far) {
@@ -296,7 +300,7 @@ void umapProcess::extract_2DboxRGB(const ros::Time& stamp, const cv::Mat& depth_
             }
         }
 
-        if (y_up < y_down) {
+        if (y_up < y_down && (y_down - y_up) >= params_.min_bbox_height_px) {
             // Draw rectangle on RGB image
             cv::Point pt1(x_start, y_up); // top-left
             cv::Point pt2(x_end, y_down); // bottom-right
@@ -353,10 +357,12 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
         int y_up = current_rgb_.rows, y_down = 0;
         int x_start = std::max(0, bb_U.x);
         int x_end = std::min(current_rgb_.cols, bb_U.x + bb_U.width);
+        const int y_start = 0;
+        const int y_end = std::max(0, std::min(current_rgb_.rows, current_rgb_.rows - params_.ignore_bottom_rows));
 
         if (x_start < depth_val.cols && x_end > 0) { // if valid
             for(int i = x_start; i < x_end; i++) {
-                for(int j = 0; j < current_rgb_.rows && j < depth_val.rows; j++) {
+                for(int j = y_start; j < y_end && j < depth_val.rows; j++) {
                     if (i < depth_val.cols) {
                         float depth = depth_val.at<float>(j, i);
                         if (std::isfinite(depth) && depth >= depth_in_near && depth <= depth_in_far) {
@@ -368,7 +374,7 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
             }
         }
 
-        if (y_up < y_down) {
+        if (y_up < y_down && (y_down - y_up) >= params_.min_bbox_height_px) {
             // 1. 生成3D box
             box3D curr_box;
             float mid_depth = (depth_in_near + depth_in_far) / 2.0;

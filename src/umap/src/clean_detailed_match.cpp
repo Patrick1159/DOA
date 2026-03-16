@@ -8,8 +8,8 @@
 using namespace std::chrono;
 
 // Helper: duration between two steady_clock time_points in milliseconds
-static inline float ms_between(const rematchNode::TimePoint& t0,
-                                const rematchNode::TimePoint& t1) {
+static inline float ms_between(const std::chrono::steady_clock::time_point& t0,
+                                const std::chrono::steady_clock::time_point& t1) {
     return static_cast<float>(
         duration_cast<microseconds>(t1 - t0).count()) / 1000.0f;
 }
@@ -18,7 +18,7 @@ rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh), tf_listener_(tf_buffer_
 {
     obstacles_sub_ = nh_.subscribe("/model_output/obstacles", 10, &rematchNode::obstacles2Tracker, this);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualization/tracked_obstacles", 10);
-    text_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualizationtext_markers", 10);
+    text_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualization/text_markers", 10);
     path_pub_ = nh_.advertise<nav_msgs::Path>("rematch/obstacle_paths", 10);
     tracker_details_pub_ = nh_.advertise<umap::TrackerDetailArray>("/rematch/tracker_details", 10);
     statistics_pub_ = nh_.advertise<umap::RematchStatistics>("/rematch_statistics", 10);
@@ -29,7 +29,9 @@ rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh), tf_listener_(tf_buffer_
     nh_.param("rematch_node/IOU_WEIGHT", rematch_params_.IOU_WEIGHT, 0.5);
     nh_.param("rematch_node/DISTANCE_THRESHOLD", rematch_params_.DISTANCE_THRESHOLD, 0.1);
     nh_.param("rematch_node/DISTANCE_WEIGHT", rematch_params_.DISTANCE_WEIGHT, 0.5);
+    nh_.param("rematch_node/TRACKING_FRAME", rematch_params_.TRACKING_FRAME, rematch_params_.TRACKING_FRAME);
     nh_.param("rematch_node/REMATCH_VIS_FRAME", rematch_params_.REMATCH_VIS_FRAME, rematch_params_.REMATCH_VIS_FRAME);
+    nh_.param("rematch_node/REMATCH_OUTPUT_FRAME", rematch_params_.REMATCH_OUTPUT_FRAME, rematch_params_.REMATCH_OUTPUT_FRAME);
     nh_.param("rematch_node/MAX_TRACKER_AGE", rematch_params_.MAX_TRACKER_AGE, 0.0);
     nh_.param("rematch_node/UNMATCHED_PUBLISH_TIMEOUT", rematch_params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5);
     nh_.param("rematch_node/EXPANSION_RATE", rematch_params_.EXPANSION_RATE, 0.3);
@@ -43,6 +45,39 @@ rematchNode::~rematchNode()
     ROS_INFO("Rematch node shutting down.");
 }
 
+bool rematchNode::transformSizeBetweenFrames(const Eigen::Vector3d& size_in,
+    const std::string& source_frame,
+    const std::string& target_frame,
+    const ros::Time& stamp,
+    Eigen::Vector3d& size_out) const {
+    if (source_frame == target_frame || source_frame.empty() || target_frame.empty()) {
+        size_out = size_in;
+        return true;
+    }
+
+    try {
+        const auto transform = tf_buffer_.lookupTransform(target_frame, source_frame, stamp, ros::Duration(0.05));
+        tf2::Quaternion q;
+        tf2::fromMsg(transform.transform.rotation, q);
+        tf2::Matrix3x3 basis(q);
+
+        Eigen::Matrix3d abs_rot;
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                abs_rot(r, c) = std::abs(basis[r][c]);
+            }
+        }
+
+        size_out = abs_rot * size_in.cwiseAbs();
+        return true;
+    } catch (const tf2::TransformException& ex) {
+        ROS_WARN_THROTTLE(1.0, "[Rematch] Failed to transform size from %s to %s: %s",
+                          source_frame.c_str(), target_frame.c_str(), ex.what());
+        size_out = size_in;
+        return false;
+    }
+}
+
 /// @brief Callback function. Convert Obstacle message to tracker measurements & features.
 /// @param dync_obstacle_msg
 void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
@@ -52,19 +87,20 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
 
     curr_obstacles_raw_ = dync_obstacle_msg;
 
-    const std::string source_frame = dync_obstacle_msg.header.frame_id.empty() ? rematch_params_.REMATCH_VIS_FRAME : dync_obstacle_msg.header.frame_id;
-    const bool need_transform = (source_frame != rematch_params_.REMATCH_VIS_FRAME);
+    const std::string tracking_frame = rematch_params_.TRACKING_FRAME;
+    const std::string source_frame = dync_obstacle_msg.header.frame_id.empty() ? tracking_frame : dync_obstacle_msg.header.frame_id;
+    const bool need_transform = (source_frame != tracking_frame);
     geometry_msgs::TransformStamped source_to_tracking_tf;
     if (need_transform) {
         try {
             source_to_tracking_tf = tf_buffer_.lookupTransform(
-                rematch_params_.REMATCH_VIS_FRAME,
+                tracking_frame,
                 source_frame,
                 dync_obstacle_msg.header.stamp,
                 ros::Duration(0.05));
         } catch (const tf2::TransformException& ex) {
             ROS_WARN_THROTTLE(1.0, "[Rematch] Failed to transform detections from %s to %s: %s. Falling back to raw measurements.",
-                              source_frame.c_str(), rematch_params_.REMATCH_VIS_FRAME.c_str(), ex.what());
+                              source_frame.c_str(), tracking_frame.c_str(), ex.what());
         }
     }
 
@@ -131,6 +167,11 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
         // Get dimensions
         Eigen::Vector3d dimension;
         dimension << dync_obstacle_msg.width[i], dync_obstacle_msg.height[i], dync_obstacle_msg.thickness[i];
+        if (need_transform && !source_to_tracking_tf.header.frame_id.empty()) {
+            Eigen::Vector3d transformed_dimension;
+            transformSizeBetweenFrames(dimension, source_frame, tracking_frame, dync_obstacle_msg.header.stamp, transformed_dimension);
+            dimension = transformed_dimension;
+        }
         dimensions.push_back(dimension);
 
         // Get HW box
@@ -195,6 +236,8 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
         stats.header.stamp    = ros::Time::now();
         stats.header.frame_id = "rematch_profiler";
 
+        stats.node_name         = "rematch";
+        stats.obstacle_count    = stat_num_detections_;
         stats.num_detections    = stat_num_detections_;
         stats.num_trackers      = stat_num_trackers_;
         stats.num_matched       = stat_num_matched_;
@@ -208,7 +251,47 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
         stats.t_publish_det_ms = ms_between(tp_vis_done_,    tp_end);
         stats.t_total_ms       = ms_between(tp_cb_start_,    tp_end);
 
+        stats.total_time = stats.t_total_ms / 1000.0f;
+        stats.model_time = 0.0f;
+        stats.preprocess_time = 0.0f;
+        stats.postprocess_time = 0.0f;
+        stats.avg_model_time_per_obstacle = 0.0f;
+        stats.sync_wait_time = 0.0f;
+        stats.e2e_latency = (ros::Time::now() - dync_obstacle_msg.header.stamp).toSec();
+
         publishStatistics(stats);
+    }
+}
+
+bool rematchNode::transformPointBetweenFrames(const Eigen::Vector3d& point_in,
+    const std::string& source_frame,
+    const std::string& target_frame,
+    const ros::Time& stamp,
+    Eigen::Vector3d& point_out) const {
+    if (source_frame == target_frame || source_frame.empty() || target_frame.empty()) {
+        point_out = point_in;
+        return true;
+    }
+
+    try {
+        const auto transform = tf_buffer_.lookupTransform(target_frame, source_frame, stamp, ros::Duration(0.05));
+
+        geometry_msgs::PointStamped point_msg_in;
+        geometry_msgs::PointStamped point_msg_out;
+        point_msg_in.header.frame_id = source_frame;
+        point_msg_in.header.stamp = stamp;
+        point_msg_in.point.x = point_in.x();
+        point_msg_in.point.y = point_in.y();
+        point_msg_in.point.z = point_in.z();
+
+        tf2::doTransform(point_msg_in, point_msg_out, transform);
+        point_out << point_msg_out.point.x, point_msg_out.point.y, point_msg_out.point.z;
+        return true;
+    } catch (const tf2::TransformException& ex) {
+        ROS_WARN_THROTTLE(1.0, "[Rematch] Failed to transform point from %s to %s: %s",
+                          source_frame.c_str(), target_frame.c_str(), ex.what());
+        point_out = point_in;
+        return false;
     }
 }
 
@@ -341,7 +424,7 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
                                   + IOU_WEIGHT * iou_cost
                                   + DISTANCE_WEIGHT * distance_cost;
                 ROS_INFO_NAMED("Rematch", "\033[1;32m  [MATCH SUCCESS] Tracker %zu <-> Detection %zu: IoU=%.3f, Similarity=%.3f, Distance=%.3f, Cost=%.6f\033[0m",
-                         i, j, iou, cosine_similarity, cost_matrix(i, j));
+                         i, j, iou, cosine_similarity, distance, cost_matrix(i, j));
             }
         }
     }
@@ -662,10 +745,11 @@ std::vector<Eigen::Vector3d> rematchNode::getNextKFrameState(const onboardDetect
 /// @param current_time Current timestamp
 void rematchNode::publishTrackerDetails(double current_time) {
     umap::TrackerDetailArray tracker_details_msg;
+    const ros::Time stamp = ros::Time::now();
     
     // Set header
-    tracker_details_msg.header.stamp = ros::Time::now();
-    tracker_details_msg.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
+    tracker_details_msg.header.stamp = stamp;
+    tracker_details_msg.header.frame_id = rematch_params_.REMATCH_OUTPUT_FRAME;
     
     // Populate tracker data
     for (const auto& tracker : trackers_) {
@@ -673,18 +757,32 @@ void rematchNode::publishTrackerDetails(double current_time) {
         
         umap::TrackerDetail detail;
         detail.tracker_id = tracker.track_id;
+
+        Eigen::Vector3d output_position = state.position;
+        transformPointBetweenFrames(state.position,
+                        rematch_params_.TRACKING_FRAME,
+                        rematch_params_.REMATCH_OUTPUT_FRAME,
+                        stamp,
+                        output_position);
         
-        detail.position.x = state.position.x();
-        detail.position.y = state.position.y();
-        detail.position.z = state.position.z();
+        detail.position.x = output_position.x();
+        detail.position.y = output_position.y();
+        detail.position.z = output_position.z();
         
         detail.velocity.x = state.velocity.x();
         detail.velocity.y = state.velocity.y();
         detail.velocity.z = state.velocity.z();
         
-        detail.box_dimensions.x = tracker.box_dimensions.x();
-        detail.box_dimensions.y = tracker.box_dimensions.y();
-        detail.box_dimensions.z = tracker.box_dimensions.z();
+        Eigen::Vector3d output_dimensions = tracker.box_dimensions;
+        transformSizeBetweenFrames(tracker.box_dimensions,
+                rematch_params_.TRACKING_FRAME,
+                rematch_params_.REMATCH_OUTPUT_FRAME,
+                stamp,
+                output_dimensions);
+
+        detail.box_dimensions.x = output_dimensions.x();
+        detail.box_dimensions.y = output_dimensions.y();
+        detail.box_dimensions.z = output_dimensions.z();
         
         detail.last_update_time = tracker.getLastUpdateTime();
         detail.age = current_time - tracker.getLastUpdateTime();

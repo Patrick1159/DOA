@@ -19,6 +19,8 @@ namespace {
     const float TEXT_COLOR_R = 0.0f;
     const float TEXT_COLOR_G = 1.0f;
     const float TEXT_COLOR_B = 0.0f;
+
+    const float MARKER_LIFETIME_SEC = 0.2f;
 }
 
 // Helper function: Find tracker array index by tracker ID
@@ -106,30 +108,47 @@ visualization_msgs::Marker rematchNode::createObstacleMarker(
     marker.id = tracker_id;
     marker.type = visualization_msgs::Marker::LINE_LIST;
     marker.action = visualization_msgs::Marker::ADD;
+    marker.lifetime = ros::Duration(MARKER_LIFETIME_SEC);
     
-    // Set position from tracker state
     auto state = trackers_[tracker_idx].getState();
-    marker.pose.position.x = state.position.x();
-    marker.pose.position.y = state.position.y();
-    marker.pose.position.z = state.position.z();
-    
-    // Add bounding box if measurement data is available
-    if (measurement_id < static_cast<int>(curr_sizes_.size())) {
-        float width = curr_sizes_[measurement_id][0];
-        float height = curr_sizes_[measurement_id][1];
-        float depth = curr_sizes_[measurement_id][2];
-        
-        auto corners = createBoundingBoxCorners(width, height, depth);
-        addBoundingBoxEdges(marker, corners);
-    }
-    
-    // Set visual properties
+
+    // 1. position: TRACKING_FRAME -> REMATCH_VIS_FRAME
+    Eigen::Vector3d vis_position = state.position;
+    transformPointBetweenFrames(state.position,
+                                rematch_params_.TRACKING_FRAME,
+                                rematch_params_.REMATCH_VIS_FRAME,
+                                timestamp,
+                                vis_position);
+    marker.pose.position.x = vis_position.x();
+    marker.pose.position.y = vis_position.y();
+    marker.pose.position.z = vis_position.z();
+
+    marker.pose.orientation.x = 0.0;
+    marker.pose.orientation.y = 0.0;
+    marker.pose.orientation.z = 0.0;
+    marker.pose.orientation.w = 1.0;
+
+    // 2. size: TRACKING_FRAME -> REMATCH_VIS_FRAME
+    Eigen::Vector3d vis_dimensions = trackers_[tracker_idx].box_dimensions;
+    transformSizeBetweenFrames(trackers_[tracker_idx].box_dimensions,
+                               rematch_params_.TRACKING_FRAME,
+                               rematch_params_.REMATCH_VIS_FRAME,
+                               timestamp,
+                               vis_dimensions);
+
+    float extent_x = vis_dimensions[0];
+    float extent_y = vis_dimensions[1];
+    float extent_z = vis_dimensions[2];
+
+    auto corners = createBoundingBoxCorners(extent_x, extent_y, extent_z);
+    addBoundingBoxEdges(marker, corners);
+
     marker.scale.x = LINE_WIDTH;
     marker.color.r = COLOR_R;
     marker.color.g = COLOR_G;
     marker.color.b = COLOR_B;
     marker.color.a = 1.0;
-    
+
     return marker;
 }
 
@@ -147,6 +166,7 @@ visualization_msgs::Marker rematchNode::createTextMarker(
     text_marker.id = tracker_id;
     text_marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
     text_marker.action = visualization_msgs::Marker::ADD;
+    text_marker.lifetime = ros::Duration(MARKER_LIFETIME_SEC);
     
     // Position above the obstacle
     text_marker.pose.position.x = position.x;
@@ -213,6 +233,7 @@ visualization_msgs::Marker rematchNode::createPathMarker(
     path_marker.id = tracker_id;
     path_marker.type = visualization_msgs::Marker::LINE_STRIP;
     path_marker.action = visualization_msgs::Marker::ADD;
+    path_marker.lifetime = ros::Duration(MARKER_LIFETIME_SEC);
     
     // Check if path exists
     auto it = tracker_paths_.find(tracker_id);
@@ -279,25 +300,21 @@ void rematchNode::deleteRemovedTrackerMarkers(
     
     for (int old_id : last_tracker_ids_) {
         if (current_tracker_ids.find(old_id) == current_tracker_ids.end()) {
-            // Delete obstacle marker
-            visualization_msgs::Marker delete_marker;
-            delete_marker.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
-            delete_marker.header.stamp = timestamp;
-            delete_marker.ns = MARKER_NS_OBSTACLES;
-            delete_marker.id = old_id;
-            delete_marker.action = visualization_msgs::Marker::DELETE;
-            marker_array.markers.push_back(delete_marker);
-            
-            // Delete text marker
-            visualization_msgs::Marker delete_text_marker = delete_marker;
-            delete_text_marker.ns = MARKER_NS_TEXT;
-            text_marker_array.markers.push_back(delete_text_marker);
-            
-            // **NEW**: Delete path marker
-            visualization_msgs::Marker delete_path_marker = delete_marker;
-            delete_path_marker.ns = MARKER_NS_PATHS;
-            path_marker_array.markers.push_back(delete_path_marker);
-            
+            auto makeDeleteMarker = [&](const std::string& ns) {
+                visualization_msgs::Marker m;
+                m.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
+                m.header.stamp = timestamp;
+                m.ns = ns;
+                m.id = old_id;
+                m.action = visualization_msgs::Marker::DELETE;
+                return m;
+            };
+            marker_array.markers.push_back(makeDeleteMarker(MARKER_NS_OBSTACLES));
+            text_marker_array.markers.push_back(makeDeleteMarker(MARKER_NS_TEXT));
+            path_marker_array.markers.push_back(makeDeleteMarker(MARKER_NS_PATHS));
+
+            tracker_paths_.erase(old_id);
+
             ROS_DEBUG_NAMED("visualization", "[Visualization] Deleting markers for tracker ID: %d", old_id);
         }
     }
@@ -319,77 +336,81 @@ void rematchNode::cleanupStalePaths() {
 // Main visualization function
 void rematchNode::publishVisualization()
 {
+    const std::string vis_frame = rematch_params_.REMATCH_VIS_FRAME;
+    const std::string output_frame = rematch_params_.REMATCH_OUTPUT_FRAME;
     std::set<int> current_tracker_ids;
     visualization_msgs::MarkerArray marker_array;
     visualization_msgs::MarkerArray text_marker_array;
-    visualization_msgs::MarkerArray path_marker_array;  // **NEW**: Separate array for paths
+    visualization_msgs::MarkerArray path_marker_array;
     ros::Time current_time = curr_obstacles_raw_.header.stamp;
 
-    ROS_DEBUG_NAMED("visualization", "[Visualization] Publishing visualization for %zu trackers", trackers_.size());
-
-    // Process each matched tracker
     for (const auto& mapping : id_mapping_) {
         int tracker_id = mapping.first;
         int measurement_id = mapping.second;
         
-        // Find the tracker index in trackers_ list
         int tracker_idx = findTrackerIndexById(tracker_id);
-        if (tracker_idx < 0) {
-            ROS_DEBUG_NAMED("visualization", "[Visualization] Tracker ID %d not found, skipping", tracker_id);
-            continue;
-        }
+        if (tracker_idx < 0) continue;
         
         current_tracker_ids.insert(tracker_id);
         
-        // Create and add obstacle bounding box marker
         auto marker = createObstacleMarker(tracker_id, tracker_idx, measurement_id, current_time);
         marker_array.markers.push_back(marker);
         
-        // Create and add text marker
         auto text_marker = createTextMarker(tracker_id, tracker_idx, marker.pose.position, current_time);
         text_marker_array.markers.push_back(text_marker);
         
-        // Update tracker path (store history)
         updateTrackerPath(tracker_id, marker.pose.position, marker.header);
+
+        // 发布 nav_msgs::Path
+        nav_msgs::Path tracker_path_msg;
+        tracker_path_msg.header.stamp = current_time;
+        tracker_path_msg.header.frame_id = output_frame;
+        for (const auto& history_pose_vis : tracker_paths_[tracker_id]) {
+            Eigen::Vector3d vis_point(history_pose_vis.pose.position.x,
+                                      history_pose_vis.pose.position.y,
+                                      history_pose_vis.pose.position.z);
+            Eigen::Vector3d output_point = vis_point;
+            transformPointBetweenFrames(vis_point, vis_frame, output_frame, current_time, output_point);
+
+            geometry_msgs::PoseStamped pose_stamped;
+            pose_stamped.header = tracker_path_msg.header;
+            pose_stamped.pose.position.x = output_point.x();
+            pose_stamped.pose.position.y = output_point.y();
+            pose_stamped.pose.position.z = output_point.z();
+            pose_stamped.pose.orientation.w = 1.0;
+            tracker_path_msg.poses.push_back(pose_stamped);
+        }
+        path_pub_.publish(tracker_path_msg);
         
-        // **NEW**: Create and add path marker
         auto path_marker = createPathMarker(tracker_id, current_time);
         path_marker_array.markers.push_back(path_marker);
-        
-        ROS_DEBUG_NAMED("visualization", "[Visualization] Processing tracker ID %d (idx %d) at position [%.3f, %.3f, %.3f]",
-                       tracker_id, tracker_idx, marker.pose.position.x, marker.pose.position.y, marker.pose.position.z);
     }
 
-    // Handle empty marker array case
-    if (marker_array.markers.empty()) {
-        visualization_msgs::Marker clear_marker;
-        clear_marker.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
-        clear_marker.header.stamp = current_time;
-        clear_marker.ns = MARKER_NS_OBSTACLES;
-        clear_marker.action = visualization_msgs::Marker::DELETEALL;
-        marker_array.markers.push_back(clear_marker);
-        
-        clear_marker.ns = MARKER_NS_TEXT;
-        text_marker_array.markers.push_back(clear_marker);
-        
-        clear_marker.ns = MARKER_NS_PATHS;
-        path_marker_array.markers.push_back(clear_marker);
+    // 处理全空情况 —— 只负责补一个占位 marker 防止空数组，不再包含 DELETEALL
+    if (marker_array.markers.empty() &&
+        text_marker_array.markers.empty() &&
+        path_marker_array.markers.empty() &&
+        last_tracker_ids_.empty()) {
+        // 真正什么都没有，直接返回
+        return;
     }
-    
-    // Delete markers for trackers that are no longer active
-    deleteRemovedTrackerMarkers(current_tracker_ids, marker_array, text_marker_array, path_marker_array, current_time);
+
+    // ✅ 先执行 DELETE，此时 last_tracker_ids_ 还未更新
+    deleteRemovedTrackerMarkers(
+        current_tracker_ids,
+        marker_array, text_marker_array, path_marker_array,
+        current_time);
+
+    // ✅ 再更新 last_tracker_ids_
     last_tracker_ids_ = current_tracker_ids;
-    
-    // Clean up stale tracker paths
-    cleanupStalePaths();
 
-    // Publish marker arrays
-    marker_pub_.publish(marker_array);
-    text_marker_pub_.publish(text_marker_array);
-    marker_pub_.publish(path_marker_array);  // **NEW**: Publish all path markers at once
-    
-    ROS_DEBUG_NAMED("visualization", "[Visualization] Published %zu markers, %zu text markers, and %zu path markers", 
-                    marker_array.markers.size(), text_marker_array.markers.size(), path_marker_array.markers.size());
+    // 发布（即使 markers 只含 DELETE 指令也要发布）
+    if (!marker_array.markers.empty())
+        marker_pub_.publish(marker_array);
+    if (!text_marker_array.markers.empty())
+        text_marker_pub_.publish(text_marker_array);
+    if (!path_marker_array.markers.empty())
+        path_marker_pub_.publish(path_marker_array);
 }
 
 int main(int argc, char **argv)

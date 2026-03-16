@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <launch>
-    <arg name="sim" default="false" />
+    <arg name="sim" default="true" />
     <group unless="$(eval arg('sim') in ['true','True','1'])">
         <rosparam command="load" file="$(find umap)/config/real_config.yaml" />
     </group>

@@ -1,12 +1,14 @@
+#!/home/patrick/miniconda3/envs/fastsam/bin/python3
+
 import torch
-import rospy
 
 class ExtractorConfig:
     """Configuration constants for the feature extractor"""
 
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    # DEVICE = "cuda"
     # Model paths
-    FASTSAM_WEIGHTS_PATH = '/home/patrick/FastSAM/weights/FastSAM.pt'
+    FASTSAM_WEIGHTS_PATH = '/home/patrick/FastSAM/weights/FastSAM-s.pt'
     CLIP_MODEL_NAME = "ViT-B/32"
     
     # Processing parameters
@@ -14,7 +16,7 @@ class ExtractorConfig:
     BOOST_CLIP = True
     RUN_SAM =True
     RUN_CLIP = True
-    ENABLE_MASK_DEBUG = True  # Enable mask debug visualization
+    ENABLE_MASK_DEBUG = False  # Enable mask debug visualization
     PARALLEL = True
     
     # SAM parameters

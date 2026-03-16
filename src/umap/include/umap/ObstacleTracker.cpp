@@ -103,7 +103,7 @@ void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const 
     lastUpdateTime = timestamp;
     history_pos.push_back(initial_pos); // Store position history
     history_vel.push_back(Eigen::Vector3d::Zero()); // Initialize velocity history
-    isDynamic = false; // Initialize as non-dynamic until enough evidence is collected
+    isDynamic = true; // Initialize as non-dynamic until enough evidence is collected
     was_dimension_expanded = false; // Initialize dimension expansion flag
     dynamic_status_locked = false;
     initialized = true;

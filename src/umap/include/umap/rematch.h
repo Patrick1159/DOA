@@ -19,6 +19,7 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <std_msgs/ColorRGBA.h>
+#include <string>
 
 class rematchNode{
 public:
@@ -105,5 +106,15 @@ private:
     void hsvToRgb(float h, float s, float v, float& r, float& g, float& b) const;
     void deleteRemovedTrackerMarkers(const std::set<int>& current_tracker_ids, visualization_msgs::MarkerArray& marker_array, visualization_msgs::MarkerArray& text_marker_array, visualization_msgs::MarkerArray& path_marker_array, const ros::Time& timestamp);
     void cleanupStalePaths();
+    bool transformPointBetweenFrames(const Eigen::Vector3d& point_in,
+        const std::string& source_frame,
+        const std::string& target_frame,
+        const ros::Time& stamp,
+        Eigen::Vector3d& point_out) const;
+    bool transformSizeBetweenFrames(const Eigen::Vector3d& size_in,
+        const std::string& source_frame,
+        const std::string& target_frame,
+        const ros::Time& stamp,
+        Eigen::Vector3d& size_out) const;
 };
 

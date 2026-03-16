@@ -43,7 +43,13 @@ trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh), tf_listener_(tf_buffer_
     nh_.param("tracker_node/EXPANSION_RATE", params_.EXPANSION_RATE, 0.3); // per second dimension expansion rate for dynamic trackers
 
     // Visualization param
+    nh_.param("tracker_node/TRACKING_FRAME", params_.TRACKING_FRAME, params_.TRACKING_FRAME);
     nh_.param("tracker_node/COARSE_VIS_FRAME", params_.COARSE_VIS_FRAME, params_.COARSE_VIS_FRAME);
+    nh_.param("tracker_node/COARSE_OUTPUT_FRAME", params_.COARSE_OUTPUT_FRAME, params_.COARSE_OUTPUT_FRAME);
+
+    // Height filter (ground false-positive suppression)
+    nh_.param("tracker_node/MIN_OBSTACLE_Z", params_.MIN_OBSTACLE_Z, params_.MIN_OBSTACLE_Z);
+    nh_.param("tracker_node/MAX_OBSTACLE_Z", params_.MAX_OBSTACLE_Z, params_.MAX_OBSTACLE_Z);
     ROS_INFO("[Tracker] Node initialized");
 }
 
@@ -57,19 +63,20 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     ROS_DEBUG_NAMED("Coarse tracker", "\n\n========== [Tracker] New Frame ==========");
     curr_boxes3D_raw_ = boxes3D_msg; // Store raw 3D boxes from message
 
-    const std::string source_frame = boxes3D_msg.header.frame_id.empty() ? params_.COARSE_VIS_FRAME : boxes3D_msg.header.frame_id;
-    const bool need_transform = (source_frame != params_.COARSE_VIS_FRAME);
+    const std::string tracking_frame = params_.TRACKING_FRAME;
+    const std::string source_frame = boxes3D_msg.header.frame_id.empty() ? tracking_frame : boxes3D_msg.header.frame_id;
+    const bool need_transform = (source_frame != tracking_frame);
     geometry_msgs::TransformStamped source_to_tracking_tf;
     if (need_transform) {
         try {
             source_to_tracking_tf = tf_buffer_.lookupTransform(
-                params_.COARSE_VIS_FRAME,
+                tracking_frame,
                 source_frame,
                 boxes3D_msg.header.stamp,
                 ros::Duration(0.05));
         } catch (const tf2::TransformException& ex) {
             ROS_WARN_THROTTLE(1.0, "[Coarse tracker] Failed to transform detections from %s to %s: %s. Falling back to raw measurements.",
-                              source_frame.c_str(), params_.COARSE_VIS_FRAME.c_str(), ex.what());
+                              source_frame.c_str(), tracking_frame.c_str(), ex.what());
         }
     }
 
@@ -94,14 +101,27 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
             measurement << point_out.point.x, point_out.point.y, point_out.point.z;
         }
 
-        measurements.push_back(measurement);
-        
+        // Height filter: drop ground-plane detections (e.g. when robot moves)
+        if (measurement.z() < params_.MIN_OBSTACLE_Z || measurement.z() > params_.MAX_OBSTACLE_Z) {
+            ROS_DEBUG_NAMED("Coarse tracker", "[Height filter] Box %zu dropped: z=%.3f not in [%.3f, %.3f]",
+                            i, measurement.z(), params_.MIN_OBSTACLE_Z, params_.MAX_OBSTACLE_Z);
+            continue;
+        }
+
         size << boxes3D_msg.width[i], boxes3D_msg.height[i], boxes3D_msg.thickness[i]; // width, height, thickness
+
+        if (need_transform && !source_to_tracking_tf.header.frame_id.empty()) {
+            Eigen::Vector3d transformed_size;
+            transformSizeBetweenFrames(size, source_frame, tracking_frame, boxes3D_msg.header.stamp, transformed_size);
+            size = transformed_size;
+        }
+
+        measurements.push_back(measurement);
         sizes.push_back(size);
 
         sensor_msgs::Image mask = boxes3D_msg.mask[i];
         masks.push_back(mask);
-        ROS_INFO_STREAM("[Coarse tracker] Box " << i << "position: [" << measurement.transpose() << "], size: [" << size.transpose() << "]");   
+        ROS_INFO_STREAM("[Coarse tracker] Box " << i << "position: [" << measurement.transpose() << "], size: [" << size.transpose() << "]");
     }
 
     curr_measurements_ = measurements;
@@ -123,6 +143,71 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     publishVisualization();
 
     ROS_DEBUG_NAMED("Coarse tracker", "=================Frame end================");
+}
+
+bool trackerNode::transformPointBetweenFrames(const Eigen::Vector3d& point_in,
+    const std::string& source_frame,
+    const std::string& target_frame,
+    const ros::Time& stamp,
+    Eigen::Vector3d& point_out) const {
+    if (source_frame == target_frame || source_frame.empty() || target_frame.empty()) {
+        point_out = point_in;
+        return true;
+    }
+
+    try {
+        const auto transform = tf_buffer_.lookupTransform(target_frame, source_frame, stamp, ros::Duration(0.05));
+
+        geometry_msgs::PointStamped point_msg_in;
+        geometry_msgs::PointStamped point_msg_out;
+        point_msg_in.header.frame_id = source_frame;
+        point_msg_in.header.stamp = stamp;
+        point_msg_in.point.x = point_in.x();
+        point_msg_in.point.y = point_in.y();
+        point_msg_in.point.z = point_in.z();
+
+        tf2::doTransform(point_msg_in, point_msg_out, transform);
+        point_out << point_msg_out.point.x, point_msg_out.point.y, point_msg_out.point.z;
+        return true;
+    } catch (const tf2::TransformException& ex) {
+        ROS_WARN_THROTTLE(1.0, "[Coarse tracker] Failed to transform point from %s to %s: %s",
+                          source_frame.c_str(), target_frame.c_str(), ex.what());
+        point_out = point_in;
+        return false;
+    }
+}
+
+bool trackerNode::transformSizeBetweenFrames(const Eigen::Vector3d& size_in,
+    const std::string& source_frame,
+    const std::string& target_frame,
+    const ros::Time& stamp,
+    Eigen::Vector3d& size_out) const {
+    if (source_frame == target_frame || source_frame.empty() || target_frame.empty()) {
+        size_out = size_in;
+        return true;
+    }
+
+    try {
+        const auto transform = tf_buffer_.lookupTransform(target_frame, source_frame, stamp, ros::Duration(0.05));
+        tf2::Quaternion q;
+        tf2::fromMsg(transform.transform.rotation, q);
+        tf2::Matrix3x3 basis(q);
+
+        Eigen::Matrix3d abs_rot;
+        for (int r = 0; r < 3; ++r) {
+            for (int c = 0; c < 3; ++c) {
+                abs_rot(r, c) = std::abs(basis[r][c]);
+            }
+        }
+
+        size_out = abs_rot * size_in.cwiseAbs();
+        return true;
+    } catch (const tf2::TransformException& ex) {
+        ROS_WARN_THROTTLE(1.0, "[Coarse tracker] Failed to transform size from %s to %s: %s",
+                          source_frame.c_str(), target_frame.c_str(), ex.what());
+        size_out = size_in;
+        return false;
+    }
 }
 
 /// @brief Save 2D bounding boxes from the message.

@@ -2,7 +2,9 @@
 
 /// @brief Publish visualization information, including 3D cubes, text markers, and dynamic obstacle information (Obstacles message type).
 void trackerNode::publishVisualization() {
-    const std::string kFrameId = params_.COARSE_VIS_FRAME;
+    const std::string tracking_frame = params_.TRACKING_FRAME;
+    const std::string vis_frame = params_.COARSE_VIS_FRAME;
+    const std::string output_frame = params_.COARSE_OUTPUT_FRAME;
     ros::Time current_time = curr_boxes3D_raw_.header.stamp; // keep stamp equal to image stamp
 
     // Helper: resolve mapping.first (track_id) to tracker vector index and tracker_id
@@ -33,7 +35,7 @@ void trackerNode::publishVisualization() {
     };
 
     // 1) Publish 3D cube markers and paths
-    auto publishCubesAndPaths = [this, &kFrameId, &current_time, &resolveMapping]() {
+    auto publishCubesAndPaths = [this, &tracking_frame, &vis_frame, &current_time, &resolveMapping]() {
         visualization_msgs::MarkerArray marker_array;
 
         for (const auto& mapping : id_mapping_) {
@@ -51,7 +53,7 @@ void trackerNode::publishVisualization() {
 
             // 1. CUBE marker
             visualization_msgs::Marker marker;
-            marker.header.frame_id = kFrameId;
+            marker.header.frame_id = vis_frame;
             marker.header.stamp = current_time;
             marker.ns = "tracked_obstacles";
             marker.id = tracker_id;
@@ -60,15 +62,22 @@ void trackerNode::publishVisualization() {
 
             auto state = trackers_[tracker_index].getState();
 
-            marker.pose.position.x = state.position.x();
-            marker.pose.position.y = state.position.y();
-            marker.pose.position.z = state.position.z();
+            Eigen::Vector3d vis_position = state.position;
+            transformPointBetweenFrames(state.position, tracking_frame, vis_frame, current_time, vis_position);
+            marker.pose.position.x = vis_position.x();
+            marker.pose.position.y = vis_position.y();
+            marker.pose.position.z = vis_position.z();
 
-            // Set marker size using current measurement size
+            marker.pose.orientation.x = 0.0;
+            marker.pose.orientation.y = 0.0;
+            marker.pose.orientation.z = 0.0;
+            marker.pose.orientation.w = 1.0;
+
+            // curr_sizes_ after transformSizeBetweenFrames: [0]=odom-X, [1]=odom-Y, [2]=odom-Z
             if (measurement_id < curr_sizes_.size()) {
-                marker.scale.x = curr_sizes_[measurement_id][0]; // thickness
-                marker.scale.y = curr_sizes_[measurement_id][2]; // width
-                marker.scale.z = curr_sizes_[measurement_id][1]; // height
+                marker.scale.x = curr_sizes_[measurement_id][0];
+                marker.scale.y = curr_sizes_[measurement_id][1];
+                marker.scale.z = curr_sizes_[measurement_id][2];
             }
 
             // Add velocity information to marker description
@@ -105,7 +114,7 @@ void trackerNode::publishVisualization() {
 
             // Create and publish path
             nav_msgs::Path path;
-            path.header.frame_id = kFrameId;
+            path.header.frame_id = vis_frame;
             path.header.stamp = current_time;
             path.poses = tracker_paths_[tracker_index];
 
@@ -134,7 +143,7 @@ void trackerNode::publishVisualization() {
         // If no dynamic obstacles were found, publish an empty marker to clear previous markers
         if (marker_array.markers.empty()) {
             visualization_msgs::Marker clear_marker;
-            clear_marker.header.frame_id = kFrameId;
+            clear_marker.header.frame_id = vis_frame;
             clear_marker.header.stamp = current_time;
             clear_marker.ns = "tracked_obstacles";
             clear_marker.action = visualization_msgs::Marker::DELETEALL;
@@ -155,7 +164,7 @@ void trackerNode::publishVisualization() {
     };
 
     // 2) Publish text markers
-    auto publishTextMarkers = [this, &kFrameId, &current_time, &resolveMapping]() {
+    auto publishTextMarkers = [this, &tracking_frame, &vis_frame, &current_time, &resolveMapping]() {
         visualization_msgs::MarkerArray text_marker_array;
 
         for (const auto& mapping : id_mapping_) {
@@ -175,7 +184,7 @@ void trackerNode::publishVisualization() {
 
             // 2. Text marker
             visualization_msgs::Marker text_marker;
-            text_marker.header.frame_id = kFrameId;
+            text_marker.header.frame_id = vis_frame;
             text_marker.header.stamp = current_time;
             text_marker.ns = "tracked_obstacles_text";
             text_marker.id = tracker_id;
@@ -183,9 +192,11 @@ void trackerNode::publishVisualization() {
             text_marker.action = visualization_msgs::Marker::ADD;
 
             // position equals cube pose position with height offset
-            text_marker.pose.position.x = state.position.x();
-            text_marker.pose.position.y = state.position.y();
-            text_marker.pose.position.z = state.position.z() + 0.5; // Offset for text height
+            Eigen::Vector3d vis_position = state.position;
+            transformPointBetweenFrames(state.position, tracking_frame, vis_frame, current_time, vis_position);
+            text_marker.pose.position.x = vis_position.x();
+            text_marker.pose.position.y = vis_position.y();
+            text_marker.pose.position.z = vis_position.z() + 0.5; // Offset for text height
             text_marker.scale.z = 0.1; // Font size 
 
             // Calculate average movement
@@ -215,7 +226,7 @@ void trackerNode::publishVisualization() {
 
         if (text_marker_array.markers.empty()) {
             visualization_msgs::Marker clear_marker;
-            clear_marker.header.frame_id = kFrameId;
+            clear_marker.header.frame_id = vis_frame;
             clear_marker.header.stamp = current_time;
             clear_marker.ns = "tracked_obstacles_text";
             clear_marker.action = visualization_msgs::Marker::DELETEALL;
@@ -227,7 +238,7 @@ void trackerNode::publishVisualization() {
     };
 
     // 3) Publish Obstacles message
-    auto publishObstaclesMsg = [this, &kFrameId, &current_time, &resolveMapping]() {
+    auto publishObstaclesMsg = [this, &tracking_frame, &output_frame, &current_time, &resolveMapping]() {
         umap::Obstacles obstacles_msg;
 
         // 3.1) First, publish matched dynamic trackers (existing behavior)
@@ -245,15 +256,17 @@ void trackerNode::publishVisualization() {
             if (!trackers_[tracker_index].isDynamic) continue; // Skip obstacles that are not consistently dynamic
 
             auto state = trackers_[tracker_index].getState();
+            Eigen::Vector3d output_position = state.position;
+            transformPointBetweenFrames(state.position, tracking_frame, output_frame, current_time, output_position);
 
             // Construct obstacles_msg using current measurement
             obstacles_msg.box_ids.push_back(tracker_id);
-            obstacles_msg.centroid_x.push_back(state.position.x());
-            obstacles_msg.centroid_y.push_back(state.position.y());
-            obstacles_msg.centroid_z.push_back(state.position.z());
-            obstacles_msg.width.push_back(curr_sizes_[measurement_id][2]);
-            obstacles_msg.height.push_back(curr_sizes_[measurement_id][0]);
-            obstacles_msg.thickness.push_back(curr_sizes_[measurement_id][1]);
+            obstacles_msg.centroid_x.push_back(output_position.x());
+            obstacles_msg.centroid_y.push_back(output_position.y());
+            obstacles_msg.centroid_z.push_back(output_position.z());
+            obstacles_msg.width.push_back(curr_sizes_[measurement_id][0]);
+            obstacles_msg.height.push_back(curr_sizes_[measurement_id][1]);
+            obstacles_msg.thickness.push_back(curr_sizes_[measurement_id][2]);
             obstacles_msg.mask.push_back(curr_masks_[measurement_id]); // Add mask to obstacles_msg
             obstacles_msg.box_x.push_back(curr_boxes2D_raw_.x[measurement_id]); // x
             obstacles_msg.box_y.push_back(curr_boxes2D_raw_.y[measurement_id]); // y
@@ -265,17 +278,19 @@ void trackerNode::publishVisualization() {
 
             // add obstacles path to obstacles_msg
             nav_msgs::Path his_path;
-            his_path.header.frame_id = kFrameId;
+            his_path.header.frame_id = output_frame;
             his_path.header.stamp = current_time;
             for(const auto& pos : state.history_pos)
             {
+                Eigen::Vector3d output_history_pos = pos;
+                transformPointBetweenFrames(pos, tracking_frame, output_frame, current_time, output_history_pos);
                 geometry_msgs::PoseStamped pose_stamped;
 
-                pose_stamped.header.frame_id = kFrameId;
+                pose_stamped.header.frame_id = output_frame;
                 pose_stamped.header.stamp = current_time;
-                pose_stamped.pose.position.x = pos.x();
-                pose_stamped.pose.position.y = pos.y();
-                pose_stamped.pose.position.z = pos.z();
+                pose_stamped.pose.position.x = output_history_pos.x();
+                pose_stamped.pose.position.y = output_history_pos.y();
+                pose_stamped.pose.position.z = output_history_pos.z();
 
                 // default identity orientation
                 pose_stamped.pose.orientation.x = 0.0;
@@ -304,6 +319,8 @@ void trackerNode::publishVisualization() {
             if (!tracker.isDynamic) continue;
 
             auto state = tracker.getState();
+            Eigen::Vector3d output_position = state.position;
+            transformPointBetweenFrames(state.position, tracking_frame, output_frame, current_time, output_position);
 
             // Use last observed measurement data for size/mask/2D box
             auto mask_it = last_mask_by_tracker_.find(tracker_id);
@@ -316,14 +333,14 @@ void trackerNode::publishVisualization() {
             }
 
             obstacles_msg.box_ids.push_back(tracker_id);
-            obstacles_msg.centroid_x.push_back(state.position.x());
-            obstacles_msg.centroid_y.push_back(state.position.y());
-            obstacles_msg.centroid_z.push_back(state.position.z());
+            obstacles_msg.centroid_x.push_back(output_position.x());
+            obstacles_msg.centroid_y.push_back(output_position.y());
+            obstacles_msg.centroid_z.push_back(output_position.z());
             // Maintain the same dimension ordering as matched case
-            const Eigen::Vector3d& sz = size3d_it->second; // [width, height, thickness]
-            obstacles_msg.width.push_back(sz[2]);
-            obstacles_msg.height.push_back(sz[0]);
-            obstacles_msg.thickness.push_back(sz[1]);
+            const Eigen::Vector3d& sz = size3d_it->second;
+            obstacles_msg.width.push_back(sz[0]);
+            obstacles_msg.height.push_back(sz[1]);
+            obstacles_msg.thickness.push_back(sz[2]);
             obstacles_msg.mask.push_back(mask_it->second);
             const auto& b2d = box2d_it->second;
             obstacles_msg.box_x.push_back(b2d[0]);
@@ -336,17 +353,19 @@ void trackerNode::publishVisualization() {
 
             // add obstacles path to obstacles_msg (use existing history_pos)
             nav_msgs::Path his_path;
-            his_path.header.frame_id = kFrameId;
+            his_path.header.frame_id = output_frame;
             his_path.header.stamp = current_time;
             for(const auto& pos : state.history_pos)
             {
+                Eigen::Vector3d output_history_pos = pos;
+                transformPointBetweenFrames(pos, tracking_frame, output_frame, current_time, output_history_pos);
                 geometry_msgs::PoseStamped pose_stamped;
 
-                pose_stamped.header.frame_id = kFrameId;
+                pose_stamped.header.frame_id = output_frame;
                 pose_stamped.header.stamp = current_time;
-                pose_stamped.pose.position.x = pos.x();
-                pose_stamped.pose.position.y = pos.y();
-                pose_stamped.pose.position.z = pos.z();
+                pose_stamped.pose.position.x = output_history_pos.x();
+                pose_stamped.pose.position.y = output_history_pos.y();
+                pose_stamped.pose.position.z = output_history_pos.z();
 
                 // default identity orientation
                 pose_stamped.pose.orientation.x = 0.0;
@@ -361,7 +380,7 @@ void trackerNode::publishVisualization() {
 
         // Publish obstacles message
         obstacles_msg.header.stamp = current_time;
-        obstacles_msg.header.frame_id = kFrameId;
+        obstacles_msg.header.frame_id = output_frame;
         obstacles_pub_.publish(obstacles_msg);
     };
 

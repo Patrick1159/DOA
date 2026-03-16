@@ -6,9 +6,9 @@ umap_node:
   row_downsample: 1 # useless param
  
   # Depth parameters
-  max_dist: 6.0 # 及时修改 否则会导致直方图全为0(出现在分母)
-  min_dist: 0.0
-  hist_size: 150
+  max_dist: 10.0 # 及时修改 否则会导致直方图全为0(出现在分母)
+  min_dist: 0.5
+  hist_size: 250
   depth_factor: 1.0 # Real depth = value / depth_factor
   inverse_depth: false
 
@@ -19,40 +19,56 @@ umap_node:
     fy: 554.3827128226441
     cx: 320.5
     cy: 240.5
+
+  # Detection-side ground suppression (before tracking)
+  ignore_bottom_rows: 0   # ignore bottom image band where floor dominates
+  min_bbox_height_px: 20   # reject thin vertical strips (common floor artifacts)
   
 tracker_node:
   # params for matching
   DYNAMIC_IOU_THRESHOLD: 0.1 #0为不筛选
-  DYNAMIC_DIST_THRESHOLD: 5.0
+  DYNAMIC_DIST_THRESHOLD: 2.5
   iou_weight: 0.7
   dist_weight: 0.3
 
   UNMATCHED_PUBLISH_TIMEOUT: 0.5 # seconds, how long to keep publishing unmatched dynamic trackers
   MAX_TRACKER_AGE: 10.0 # seconds, max age of a tracker without updates
   # params for determination of dynamic obstacles
-  DYNAMIC_VELOCITY_THRESHOLD: 0.0
-  DYNAMIC_VELOCITY_MAX: 100.0
+  DYNAMIC_VELOCITY_THRESHOLD: 0.05  # m/s; > 0 prevents ground/noise from being classified dynamic
+  DYNAMIC_VELOCITY_MAX: 5.0
 
-  SUSTAINED_VELOCITY_THRESHOLD: 0.3
-  SUSTAINED_VELOCITY_COUNT: 3
+  SUSTAINED_VELOCITY_THRESHOLD: 0.15
+  SUSTAINED_VELOCITY_COUNT: 2  # require 2 consecutive frames of movement before classifying as dynamic
 
-  AVERAGE_DEPLACEMENT_THRESHOLD: 0.15
+  AVERAGE_DEPLACEMENT_THRESHOLD: 0.05
+
+  # Height filter (in odom frame, z-up). Drops ground-plane detections.
+  MIN_OBSTACLE_Z: 0.2   # m — anything below this is treated as ground and ignored
+  MAX_OBSTACLE_Z: 10   # m — anything above this (ceiling/sky artifact) is also ignored
   HISTORY_SIZE: 10 # History size for pos & vel
   # params for isDynamic
   STATUS_HISTORY_SIZE: 10
   MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3
 
   # Visualization frame id
+  TRACKING_FRAME: "odom"
   COARSE_VIS_FRAME: "odom"
+  COARSE_OUTPUT_FRAME: "odom"
 
 rematch_node:
-  SIMILARITY_THRESHOLD: 0.71
+  SIMILARITY_THRESHOLD: 0.15
   SIMILARITY_WEIGHT: 0.8
 
-  IOU_THRESHOLD: 0.1
+  IOU_THRESHOLD: 0.35
   IOU_WEIGHT: 0.5
-  
-  VELOCITY_DIFF_THRESHOLD: 0.5
-  VELOCITY_DIFF_WEIGHT: 0.5
-  MAX_TRACKER_AGE : 0.0 # seconds, max age of a tracker without updates
+
+  DISTANCE_THRESHOLD: 1.0
+  DISTANCE_WEIGHT: 0.5
+
+  MAX_TRACKER_AGE: 1.0
+  UNMATCHED_PUBLISH_TIMEOUT: 0.8
+  EXPANSION_RATE: 0.05
+
+  TRACKING_FRAME: "odom"
   REMATCH_VIS_FRAME: "odom"
+  REMATCH_OUTPUT_FRAME: "odom"

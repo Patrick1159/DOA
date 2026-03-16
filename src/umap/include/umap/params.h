@@ -21,6 +21,10 @@ struct umapParams {
     float fy = 525.0;
     float px = 319.5;
     float py = 239.5;
+
+    // Detection-side ground suppression params
+    int ignore_bottom_rows = 0;      // ignore bottom N rows in depth image when extracting candidates
+    int min_bbox_height_px = 8;      // reject very thin vertical boxes (typical floor strips)
 };
 
 struct trackerParams{
@@ -37,12 +41,20 @@ struct trackerParams{
     double UNMATCHED_PUBLISH_TIMEOUT; // seconds, how long to keep publishing unmatched dynamic trackers
     double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
     
-    std::string COARSE_VIS_FRAME = "odom"; // default tracking / visualization frame id
+    std::string TRACKING_FRAME = "odom"; // internal tracker state frame
+    std::string COARSE_VIS_FRAME = "odom"; // visualization frame id for coarse markers
+    std::string COARSE_OUTPUT_FRAME = "odom"; // frame id for published coarse obstacle messages
     double AVERAGE_DEPLACEMENT_THRESHOLD; // m threshold for average displacement of a tracker
     int HISTORY_SIZE; // 每个tracker的历史vel和pos留存长度
     int STATUS_HISTORY_SIZE; // 每个tracker的历史STATUS留存长度
     int MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE; // tracker改变状态所需要的最小稳定帧, <= STATUS_HISTORY_SIZE!
     bool FORCE_DYNAMIC = false; // once locked as dynamic, keep dynamic until tracker is removed
+
+    // Height filter (in TRACKING_FRAME, typically odom, z-up)
+    // Detections with centroid z outside [MIN_OBSTACLE_Z, MAX_OBSTACLE_Z] are dropped
+    // before tracking — removes ground-plane false positives when robot is moving.
+    double MIN_OBSTACLE_Z = -0.5; // m, default: no filter
+    double MAX_OBSTACLE_Z =  5.0; // m, default: no filter
 };
 
 struct rematchParams{
@@ -59,7 +71,9 @@ struct rematchParams{
     double UNMATCHED_PUBLISH_TIMEOUT; // seconds, how long to keep publishing unmatched trackers
     double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
 
-    std::string REMATCH_VIS_FRAME = "odom";
+    std::string TRACKING_FRAME = "odom"; // internal tracker state frame
+    std::string REMATCH_VIS_FRAME = "odom"; // visualization frame id for rematch markers
+    std::string REMATCH_OUTPUT_FRAME = "odom"; // frame id for published tracker details and paths
 };
 
 #endif // UMAP_PARAMS_H

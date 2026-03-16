@@ -17,6 +17,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <std_msgs/ColorRGBA.h>
 #include <array>
+#include <string>
 
 
 class trackerNode{
@@ -81,4 +82,14 @@ private:
 
     bool isDynamicTracker(onboardDetector::ObstacleTracker& tracker) const;
     void clipFeatureProcess(const umap::MultiImageFeatures& clip_feature_msg); // Callback for clip features
+    bool transformPointBetweenFrames(const Eigen::Vector3d& point_in,
+        const std::string& source_frame,
+        const std::string& target_frame,
+        const ros::Time& stamp,
+        Eigen::Vector3d& point_out) const;
+    bool transformSizeBetweenFrames(const Eigen::Vector3d& size_in,
+        const std::string& source_frame,
+        const std::string& target_frame,
+        const ros::Time& stamp,
+        Eigen::Vector3d& size_out) const;
 };
