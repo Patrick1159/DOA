@@ -1,61 +1,73 @@
 umap_node:
   # Processing parameters
-  threshold_point: 0.03 # 0.035 
-  threshold_line: 5.0 # 5.0good
-  min_length_line: 30
-  row_downsample: 1 # useless param
+  threshold_point: 0.025 # 0.035 # 0.05
+  threshold_line: 2.5 # 3.0good
+  min_length_line: 50
  
   # Depth parameters
-  max_dist: 7000.0 # 及时修改 否则会导致直方图全为0(出现在分母)
-  min_dist: 0.0
-  hist_size: 250
+  max_dist: 7000 # 及时修改 否则会导致直方图全为0(出现在分母)
+  min_dist: 500
+  hist_size: 300
   depth_factor: 1000.0 # Real depth = value / depth_factor
   inverse_depth: false
 
   # Camera parameters
-  camera_frame: "d400_depth_optical_frame"
+  camera_frame: "d435_color_optical_frame"
   camera:
-    fx: 605.3289184570312
-    fy: 603.8843994140625
-    cx: 325.57720947265625
-    cy: 242.66864013671875
+    fx: 906.63427734375
+    fy: 904.7266845703125
+    cx: 637.7507934570312
+    cy: 383.7644958496094
+
+  # Detection-side ground suppression (before tracking)
+  ignore_bottom_rows: 0   # ignore bottom image band where floor dominates
+  min_bbox_height_px: 20   # reject thin vertical strips (common floor artifacts)
   
 tracker_node:
   # params for matching
   DYNAMIC_IOU_THRESHOLD: 0.1 #0为不筛选
-  DYNAMIC_DIST_THRESHOLD: 2.0
+  DYNAMIC_DIST_THRESHOLD: 2.5
   iou_weight: 0.7
   dist_weight: 0.3
 
   UNMATCHED_PUBLISH_TIMEOUT: 0.5 # seconds, how long to keep publishing unmatched dynamic trackers
-  EXPANSION_RATE: 0.5 # per second dimension expansion rate for dynamic trackers
-  MAX_TRACKER_AGE: 1.0 # seconds, max age of a tracker without updates
+  MAX_TRACKER_AGE: 10.0 # seconds, max age of a tracker without updates
   # params for determination of dynamic obstacles
-  DYNAMIC_VELOCITY_THRESHOLD: 0.1
+  DYNAMIC_VELOCITY_THRESHOLD: 0.01  # m/s; > 0 prevents ground/noise from being classified dynamic
   DYNAMIC_VELOCITY_MAX: 5.0
 
-  SUSTAINED_VELOCITY_THRESHOLD: 0.1
-  SUSTAINED_VELOCITY_COUNT: 3
+  SUSTAINED_VELOCITY_THRESHOLD: 0.05
+  SUSTAINED_VELOCITY_COUNT: 2  # require 2 consecutive frames of movement before classifying as dynamic
 
-  AVERAGE_DEPLACEMENT_THRESHOLD: 0.1
+  AVERAGE_DEPLACEMENT_THRESHOLD: 0.05
+
+  # Height filter (in odom frame, z-up). Drops ground-plane detections.
+  MIN_OBSTACLE_Z: 0.2   # m — anything below this is treated as ground and ignored
+  MAX_OBSTACLE_Z: 10   # m — anything above this (ceiling/sky artifact) is also ignored
   HISTORY_SIZE: 10 # History size for pos & vel
   # params for isDynamic
   STATUS_HISTORY_SIZE: 10
-  MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3 # 3
+  MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3
 
   # Visualization frame id
-  COARSE_VIS_FRAME: "d400_depth_optical_frame"
+  TRACKING_FRAME: "world"
+  COARSE_VIS_FRAME: "world"
+  COARSE_OUTPUT_FRAME: "world"
 
 rematch_node:
-  SIMILARITY_THRESHOLD: 0.5
-  SIMILARITY_WEIGHT: 1.0
+  SIMILARITY_THRESHOLD: 0.15
+  SIMILARITY_WEIGHT: 0.8
 
-  IOU_THRESHOLD: -1.0 # set to negative to disable IOU filtering
-  IOU_WEIGHT: 0.0
-  
-  DISTANCE_THRESHOLD: 1.5
+  IOU_THRESHOLD: 0.35
+  IOU_WEIGHT: 0.5
+
+  DISTANCE_THRESHOLD: 1.0
   DISTANCE_WEIGHT: 0.5
-  MAX_TRACKER_AGE : 10.0 # seconds, max age of a tracker without updates
-  UNMATCHED_PUBLISH_TIMEOUT: 2.5 # seconds, how long to keep publishing unmatched trackers
-  EXPANSION_RATE: 100.0 # per second dimension expansion rate for dynamic trackers
-  REMATCH_VIS_FRAME: "d400_depth_optical_frame"
+
+  MAX_TRACKER_AGE: 1.0
+  UNMATCHED_PUBLISH_TIMEOUT: 0.8
+  EXPANSION_RATE: 0.05
+
+  TRACKING_FRAME: "world"
+  REMATCH_VIS_FRAME: "world"
+  REMATCH_OUTPUT_FRAME: "world"

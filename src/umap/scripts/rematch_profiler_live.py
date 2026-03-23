@@ -1,4 +1,4 @@
-#!/home/user/miniconda3/envs/oa/bin/python3
+#!/home/patrick/miniconda3/envs/fastsam/bin/python3
 """
 rematch_profiler_live.py
 ========================
@@ -29,6 +29,7 @@ from umap.msg import RematchStatistics
 # ─── 配置 ──────────────────────────────────────────────────────────────────
 WINDOW_SIZE   = 50          # 滑动窗口长度（帧数）
 REFRESH_HZ    = 2.0         # 终端刷新频率
+E2E_MAX_SEC   = 10.0        # 超过该阈值的 e2e_latency 视为异常值并忽略
 NODES         = ['sam', 'clip', 'aggregator']
 TOPICS        = {
     'sam':         '/rematch_statistics_sam',
@@ -57,6 +58,7 @@ class NodeStats:
         self.window = window
         self.win: Dict[str, deque] = {f: deque(maxlen=window) for f in self.FIELDS}
         self.all: Dict[str, List]  = {f: []                   for f in self.FIELDS}
+        self.invalid: Dict[str, int] = defaultdict(int)
         self.recv_count = 0
 
     def update(self, msg: RematchStatistics):
@@ -64,13 +66,22 @@ class NodeStats:
             self.recv_count += 1
             for f in self.FIELDS:
                 v = float(getattr(msg, f))
+                if not math.isfinite(v):
+                    self.invalid[f] += 1
+                    continue
+
+                # e2e_latency 异常值（通常由 header.stamp 为 0 导致）直接过滤
+                if f == 'e2e_latency' and (v < 0.0 or v > E2E_MAX_SEC):
+                    self.invalid[f] += 1
+                    continue
+
                 self.win[f].append(v)
                 self.all[f].append(v)
 
     def snapshot(self) -> dict:
         """返回当前滑动窗口统计（线程安全）"""
         with self._lock:
-            result: Dict = {'recv_count': self.recv_count}
+            result: Dict = {'recv_count': self.recv_count, 'invalid': dict(self.invalid)}
             for f in self.FIELDS:
                 data = list(self.win[f])
                 if not data:
@@ -90,7 +101,7 @@ class NodeStats:
     def summary(self) -> dict:
         """全程汇总统计"""
         with self._lock:
-            result: Dict = {'recv_count': self.recv_count}
+            result: Dict = {'recv_count': self.recv_count, 'invalid': dict(self.invalid)}
             for f in self.FIELDS:
                 data = self.all[f]
                 if not data:
@@ -136,10 +147,42 @@ def _section(title: str, node: str, snap: dict):
     lines.append(_stat_row('  ├ model_time',            snap['model_time']))
     lines.append(_stat_row('  ├ preprocess_time',       snap['preprocess_time']))
     lines.append(_stat_row('  └ postprocess_time',      snap['postprocess_time']))
+
+    # 一致性检查：分项和是否与 total_time 相符；e2e 是否显著大于 total
+    total = snap.get('total_time')
+    model = snap.get('model_time')
+    pre   = snap.get('preprocess_time')
+    post  = snap.get('postprocess_time')
+    e2e   = snap.get('e2e_latency')
+    if total and model and pre and post:
+        comp_mean = model['mean'] + pre['mean'] + post['mean']
+        comp_p95 = model['p95'] + pre['p95'] + post['p95']
+        comp_max = model['max'] + pre['max'] + post['max']
+        comp = {'mean': comp_mean, 'p95': comp_p95, 'max': comp_max, 'min': 0.0, 'n': total['n']}
+        lines.append(_stat_row('sum(model+pre+post)', comp))
+
+        gap_mean = total['mean'] - comp_mean
+        gap_p95 = total['p95'] - comp_p95
+        gap_max = total['max'] - comp_max
+        gap = {'mean': gap_mean, 'p95': gap_p95, 'max': gap_max, 'min': 0.0, 'n': total['n']}
+        lines.append(_stat_row('total - sum(above)', gap))
+
+    if e2e and total:
+        q_mean = e2e['mean'] - total['mean']
+        q_p95 = e2e['p95'] - total['p95']
+        q_max = e2e['max'] - total['max']
+        q = {'mean': q_mean, 'p95': q_p95, 'max': q_max, 'min': 0.0, 'n': min(e2e['n'], total['n'])}
+        lines.append(_stat_row('e2e - total (queue/transport)', q))
+
     lines.append(_stat_row('avg_model/obstacle',        snap['avg_model_time_per_obstacle']))
     if node == 'aggregator':
         lines.append(_stat_row('sync_wait_time',        snap['sync_wait_time']))
     lines.append(_stat_row('obstacle_count (per frame)',snap['obstacle_count'], unit_ms=False))
+
+    invalid_e2e = snap.get('invalid', {}).get('e2e_latency', 0)
+    if invalid_e2e > 0:
+        lines.append(f"  {YELLOW}e2e_latency ignored invalid samples: {invalid_e2e}{RESET}")
+
     return '\n'.join(lines)
 
 
@@ -182,6 +225,7 @@ class RematchProfiler:
         lines.append(f"{BOLD}  rematch_profiler_live  —  sliding window = {WINDOW_SIZE} frames{RESET}")
         lines.append(f"{BOLD}{'='*65}{RESET}")
         lines.append(f"  {DIM}All times in milliseconds (ms){RESET}")
+        lines.append(f"  {DIM}e2e_latency = queue + transport + compute; may be > total_time{RESET}")
 
         for node in NODES:
             snap = self.stats[node].snapshot()
@@ -236,7 +280,8 @@ class RematchProfiler:
                 fields = NodeStats.FIELDS
                 f.write('node,' + ','.join(
                     [f'{field}_{stat}' for field in fields
-                     for stat in ['mean', 'p95', 'max', 'min']]) + '\n')
+                     for stat in ['mean', 'p95', 'max', 'min']] +
+                    ['e2e_invalid_samples']) + '\n')
                 for node in NODES:
                     summ = self.stats[node].summary()
                     row = [node]
@@ -247,6 +292,7 @@ class RematchProfiler:
                         else:
                             row += [f"{d['mean']:.6f}", f"{d['p95']:.6f}",
                                     f"{d['max']:.6f}", f"{d['min']:.6f}"]
+                    row += [str(summ.get('invalid', {}).get('e2e_latency', 0))]
                     f.write(','.join(row) + '\n')
             print(f"\n{GREEN}  Summary CSV saved to: {csv_path}{RESET}")
         except Exception as e:

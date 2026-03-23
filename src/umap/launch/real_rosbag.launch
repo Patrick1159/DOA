@@ -1,16 +1,15 @@
 <?xml version="1.0"?>
 <launch>
 
-    <arg name="rgb_topic" default="/d400/color/image_raw" />
-    <arg name="aligned_depth_topic" default="/d400/aligned_depth_to_color/image_raw" />
+    <arg name="rgb_topic" default="/d435/color/image_raw" />
+    <arg name="aligned_depth_topic" default="/d435/aligned_depth_to_color/image_raw" />
     
-    <param name="use_sim_time" value="true" />
     <!-- Launch RViz for visualization -->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/user/simulation_framework/src/DOA/src/umap/rviz/benchmark.rviz" />
+    <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d /home/user/new_DOA/DOA/src/umap/rviz/benchmark.rviz" /> -->
 
     <!-- UMAP -->
     <!-- Load parameters -->
-    <rosparam command="load" file="$(find umap)/config/rosbag.yaml" />
+    <rosparam command="load" file="$(find umap)/config/rosbag_param.yaml" />
     
     <!-- Launch main node -->
     <node pkg="umap" type="umap_extract" name="umap_node" output="screen">
@@ -19,12 +18,12 @@
     </node>
 
     <!-- COARSE -->
-    <rosparam command="load" file="$(find umap)/config/rosbag.yaml" />
+    <rosparam command="load" file="$(find umap)/config/rosbag_param.yaml" />
     <!-- <param name="use_sim_time" value="true" /> -->
     <node pkg="umap" type="coarse_match" name="coarse_match_tracker" output="screen" />
 
     <!-- DETAILED -->
-    <rosparam command="load" file="$(find umap)/config/rosbag.yaml" />
+    <rosparam command="load" file="$(find umap)/config/rosbag_param.yaml" />
     <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
 
     <!-- Feature Extractor -->
@@ -38,6 +37,11 @@
     
 
     <!-- Pointcloud Generate -->
+    <node pkg="pointcloud_generator" type="camera_pose.py" name="d435_pose" output="screen">
+        <param name="parent_frame_id" value="odom" />
+        <param name="child_frame_id" value="d435_color_optical_frame" />
+    </node>
+
     <node name="camera_node" pkg="pointcloud_generator" type="processor" output="screen">
         <rosparam file="$(find pointcloud_generator)/param/default_param.yaml" command="load"/>
         <param name="/camera/pointcloud_frame_id" value="world"/>
@@ -49,7 +53,7 @@
         <param name="/pointcloud_generate/camera/eud_range" value="0.01"/>
         <param name="/pointcloud_generate/camera/eud_min_points_num" value="10"/>
 
-        <remap from="/RED/pointcloud_process/camera_pose" to="/camera/current_pose"/>
+        <remap from="/RED/pointcloud_process/camera_pose" to="/d435_camera_baselink_pose"/>
         <remap from="/RED/pointcloud_process/odom" to="/uav0/mavros/local_position/odom"/>
         <remap from="/RED/pointcloud_process/color_image" to="$(arg rgb_topic)"/>
         <remap from="/RED/pointcloud_process/depth_image" to="$(arg aligned_depth_topic)"/>
@@ -57,7 +61,7 @@
     </node>
 
     <!-- TF -->
-    <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_odom" args="-2.3 0.3 -0.1 0 0 0 world odom" />
-    <node pkg="tf2_ros" type="static_transform_publisher" name="odom_to_t265_link" args="0 0 0 0 0 0 odom t265_link" />
-    <node pkg="tf2_ros" type="static_transform_publisher" name="t265_to_d400_depth_optical_frame" args="0 0 0 1.57 0 0 t265_link d400_depth_optical_frame" />
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_odom" args="-2.3 0.3 -0.1 0 0 0 world odom" /> -->
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="odom_to_t265_link" args="0 0 0 0 0 0 odom t265_link" /> -->
+    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="t265_to_d435_depth_optical_frame" args="0 0 0 1.57 0 0 t265_link d435_depth_optical_frame" /> -->
 </launch>

@@ -20,10 +20,7 @@ class NormalizedCameraFramePublisher:
         self.source_frame = rospy.get_param('~source_frame', 't265_pose_frame')
         self.target_frame = rospy.get_param('~target_frame', 'map')
         self.output_frame = rospy.get_param('~output_frame', 'real_baselink')
-        self.k_init_frames = rospy.get_param('~k_init_frames', 30)
-        self.yaw_offset_deg = rospy.get_param('~yaw_offset_deg', 90.0)
-        self.yaw_offset_rad = np.deg2rad(self.yaw_offset_deg)
-        self.R_yaw_offset = R.from_euler('z', self.yaw_offset_rad).as_matrix()
+        self.k_init_frames = rospy.get_param('~k_init_frames', 10)
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
@@ -39,7 +36,6 @@ class NormalizedCameraFramePublisher:
         rospy.loginfo(f" - Source frame: {self.source_frame}")
         rospy.loginfo(f" - Target frame: {self.target_frame}")
         rospy.loginfo(f" - Output frame: {self.output_frame}")
-        rospy.loginfo(f" - Yaw offset (deg): {self.yaw_offset_deg:.2f}")
     
     def get_init_R(self, transform_stamped):
         """通过前k帧的TransformStamped消息计算初始旋转矩阵R"""
@@ -129,9 +125,7 @@ class NormalizedCameraFramePublisher:
         if self.R_init_inv is not None:
             current_rot = T_source_target[:3, :3]
             # 左乘右乘?
-            rel_rot = self.R_init_inv @ current_rot
-            yaw = R.from_matrix(rel_rot).as_euler('zyx', degrees=False)[0]
-            T_target_normalized[:3, :3] = R.from_euler('z', yaw + self.yaw_offset_rad).as_matrix()
+            T_target_normalized[:3, :3] = self.R_init_inv @ current_rot
             # T_target_normalized[:3, :3] = current_rot @ self.R_avg
         
         return T_target_normalized
