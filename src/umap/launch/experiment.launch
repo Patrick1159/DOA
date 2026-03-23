@@ -9,7 +9,7 @@
 
     <!-- UMAP -->
     <!-- Load parameters -->
-    <rosparam command="load" file="$(find umap)/config/real_config.yaml" />
+    <rosparam command="load" file="$(find umap)/config/experiment.yaml" />
     
     <!-- Launch main node -->
     <node pkg="umap" type="umap_extract" name="umap_node" output="screen">
@@ -18,13 +18,13 @@
     </node>
 
     <!-- COARSE -->
-    <rosparam command="load" file="$(find umap)/config/real_config.yaml" />
+    <rosparam command="load" file="$(find umap)/config/experiment.yaml" />
     <!-- <param name="use_sim_time" value="true" /> -->
     <node pkg="umap" type="coarse_match" name="coarse_match_tracker" output="screen" />
 
     <!-- DETAILED -->
-    <!-- <rosparam command="load" file="$(find umap)/config/real_config.yaml" />
-    <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" /> -->
+    <rosparam command="load" file="$(find umap)/config/experiment.yaml" />
+    <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
 
     <!-- Feature Extractor -->
     <node pkg="umap" type="para_samnode.py" name="para_sam_node" output="screen">
@@ -45,7 +45,7 @@
     <node name="camera_node" pkg="pointcloud_generator" type="processor" output="screen">
         <rosparam file="$(find pointcloud_generator)/param/default_param.yaml" command="load"/>
         <param name="/camera/pointcloud_frame_id" value="odom"/>
-        <param name="/pointcloud_generate/dynamic_only" value="true"/>
+        <param name="/pointcloud_generate/dynamic_only" value="false"/>
 
         <param name="/pointcloud_generate/camera/view_field" value="4.0"/>
         <param name="/pointcloud_generate/camera/self_filter" value="0.1"/>

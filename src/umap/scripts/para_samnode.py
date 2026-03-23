@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
+#!/home/user/miniconda3/envs/oa/bin/python3
 """
 Subscribes to dynamic obstacles and image topics, processes ROIs, and publishes results.
 """

@@ -132,6 +132,11 @@ umap_node:
   merge_horizontal_gap: 100
   merge_max_row_gap: 8
   merge_min_vertical_overlap_ratio: 0.3
+  enable_adaptive_horizontal_merge: true
+  adaptive_merge_min_gap: 20
+  adaptive_merge_max_gap: 100
+  adaptive_merge_near_ratio: 0.25
+  adaptive_merge_far_ratio: 0.85
 ```
 
 **新增参数说明：**
@@ -153,15 +158,33 @@ umap_node:
   - 两个框在深度 bin 方向的最小重叠比例。
   - 值越大，合并越保守。
 
+- `enable_adaptive_horizontal_merge`
+  - 是否启用“近距离 gap 更大、远距离 gap 更小”的自适应横向合并。
+  - 开启后，`merge_horizontal_gap` 会退化为兜底/兼容参数，实际阈值由下面 4 个参数控制。
+
+- `adaptive_merge_min_gap` / `adaptive_merge_max_gap`
+  - 分别对应远距离和近距离时的横向 gap 阈值。
+  - 近距离目标更容易被拆成多个峰，因此通常 `max_gap` 明显大于 `min_gap`。
+
+- `adaptive_merge_near_ratio` / `adaptive_merge_far_ratio`
+  - 用 U-map 的深度 bin 归一化位置来定义“近”和“远”的过渡区间。
+  - 小于 `near_ratio` 按“近距离”处理，大于 `far_ratio` 按“远距离”处理，中间线性插值。
+
 **推荐调参顺序：**
 
 1. 先调 `merge_horizontal_gap`
    - 近距离双腿仍分裂：增大到 `40 ~ 100`
    - 误合并明显：减小到 `20 ~ 40`
-2. 再调 `merge_min_vertical_overlap_ratio`
+2. 若已启用自适应 merge，优先调 `adaptive_merge_max_gap`
+  - 近距离双腿仍分裂：增大到 `80 ~ 140`
+  - 近距离误合并明显：减小到 `50 ~ 80`
+3. 再调 `adaptive_merge_min_gap`
+  - 远距离误合并明显：减小到 `10 ~ 25`
+  - 远距离仍容易碎裂：增大到 `25 ~ 40`
+4. 再调 `merge_min_vertical_overlap_ratio`
    - 误合并多：提高到 `0.4 ~ 0.5`
    - 想更容易合并：降低到 `0.2 ~ 0.3`
-3. 最后微调 `merge_max_row_gap`
+5. 最后微调 `merge_max_row_gap`
    - 一般 `6 ~ 12` 足够
 
 **和原始聚类参数的配合建议：**

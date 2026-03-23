@@ -32,6 +32,11 @@ umapProcess::umapProcess() {
     nh_.param("umap_node/merge_horizontal_gap", params_.merge_horizontal_gap, 30);
     nh_.param("umap_node/merge_max_row_gap", params_.merge_max_row_gap, 8);
     nh_.param("umap_node/merge_min_vertical_overlap_ratio", params_.merge_min_vertical_overlap_ratio, 0.3f);
+    nh_.param("umap_node/enable_adaptive_horizontal_merge", params_.enable_adaptive_horizontal_merge, true);
+    nh_.param("umap_node/adaptive_merge_min_gap", params_.adaptive_merge_min_gap, 20);
+    nh_.param("umap_node/adaptive_merge_max_gap", params_.adaptive_merge_max_gap, 100);
+    nh_.param("umap_node/adaptive_merge_near_ratio", params_.adaptive_merge_near_ratio, 0.25f);
+    nh_.param("umap_node/adaptive_merge_far_ratio", params_.adaptive_merge_far_ratio, 0.85f);
 
     nh_.param("umap_node/camera_frame", params_.camera_frame, std::string("camera_color_optical_frame"));
     nh_.param("umap_node/camera/fx", params_.fx, 525.0f);
@@ -162,6 +167,34 @@ cv::Rect umapProcess::mergeRects(const cv::Rect& first, const cv::Rect& second) 
     return cv::Rect(left, top, right - left, bottom - top);
 }
 
+int umapProcess::computeAdaptiveMergeGap(const cv::Rect& first, const cv::Rect& second) const {
+    if (!params_.enable_adaptive_horizontal_merge || params_.hist_size <= 0) {
+        return params_.merge_horizontal_gap;
+    }
+
+    const float first_center_row = first.y + first.height * 0.5f;
+    const float second_center_row = second.y + second.height * 0.5f;
+    const float average_center_row = 0.5f * (first_center_row + second_center_row);
+    const float normalized_depth_ratio = std::max(0.0f, std::min(1.0f, average_center_row / static_cast<float>(params_.hist_size)));
+
+    const float near_ratio = std::max(0.0f, std::min(1.0f, params_.adaptive_merge_near_ratio));
+    const float far_ratio = std::max(near_ratio, std::min(1.0f, params_.adaptive_merge_far_ratio));
+    const int min_gap = std::min(params_.adaptive_merge_min_gap, params_.adaptive_merge_max_gap);
+    const int max_gap = std::max(params_.adaptive_merge_min_gap, params_.adaptive_merge_max_gap);
+
+    if (normalized_depth_ratio <= near_ratio) {
+        return max_gap;
+    }
+
+    if (normalized_depth_ratio >= far_ratio) {
+        return min_gap;
+    }
+
+    const float transition = (normalized_depth_ratio - near_ratio) / std::max(1e-6f, far_ratio - near_ratio);
+    const float interpolated_gap = max_gap - transition * static_cast<float>(max_gap - min_gap);
+    return static_cast<int>(std::round(interpolated_gap));
+}
+
 bool umapProcess::shouldMergeUVBoxes(const cv::Rect& first, const cv::Rect& second) const {
     const int first_right = first.x + first.width;
     const int second_right = second.x + second.width;
@@ -173,7 +206,8 @@ bool umapProcess::shouldMergeUVBoxes(const cv::Rect& first, const cv::Rect& seco
         horizontal_gap = first.x - second_right;
     }
 
-    if (horizontal_gap > params_.merge_horizontal_gap) {
+    const int effective_horizontal_gap = computeAdaptiveMergeGap(first, second);
+    if (horizontal_gap > effective_horizontal_gap) {
         return false;
     }
 

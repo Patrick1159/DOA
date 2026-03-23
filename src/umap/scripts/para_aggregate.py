@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
+#!/home/user/miniconda3/envs/oa/bin/python3
 """
 Subscribe CLIP and SAM messages, publish full /model_output/obstacles message.
 

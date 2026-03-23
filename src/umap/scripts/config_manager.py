@@ -6,7 +6,7 @@ class ExtractorConfig:
 
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     # Model paths
-    FASTSAM_WEIGHTS_PATH = '/home/patrick/FastSAM/weights/FastSAM.pt'
+    FASTSAM_WEIGHTS_PATH = '/home/user/FastSAM/weights/FastSAM.pt'
     CLIP_MODEL_NAME = "ViT-B/32"
     
     # Processing parameters
@@ -18,7 +18,7 @@ class ExtractorConfig:
     PARALLEL = True
     
     # SAM parameters
-    SAM_CONFIDENCE = 0.5
+    SAM_CONFIDENCE = 0.7
     SAM_IOU = 0.8
     SAM_IMAGE_SIZE = 64
     SAM_BATCH_SIZE = 12  # Batch inference - adjust based on GPU memory (2-8 recommended)

@@ -2,10 +2,11 @@
 <launch>
     <arg name="sim" default="false" />
     <group unless="$(eval arg('sim') in ['true','True','1'])">
-        <rosparam command="load" file="$(find umap)/config/real_config.yaml" />
+        <rosparam command="load" file="$(find umap)/config/experiment.yaml" />
     </group>
     <group if="$(eval arg('sim') in ['true','True','1'])">
         <rosparam command="load" file="$(find umap)/config/simulation.yaml" />
     </group>
     <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
+    <node pkg="umap" type="t265_baselink.py" name="baselink_publisher" output="screen" />
 </launch>

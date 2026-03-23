@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
+#!/home/user/miniconda3/envs/oa/bin/python3
 """
 CLIP process node, for parallel processing of images using FastSAM.
 """

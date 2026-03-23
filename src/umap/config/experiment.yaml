@@ -2,7 +2,7 @@ umap_node:
   # Processing parameters
   threshold_point: 0.06 # 0.035 + 5.5
   threshold_line: 2.5 # 5.0good
-  min_length_line: 40 # 30
+  min_length_line: 20 # 30
   row_downsample: 1 # useless param
  
   # Depth parameters
@@ -12,9 +12,14 @@ umap_node:
   depth_factor: 1000.0 # Real depth = value / depth_factor
   inverse_depth: false
   enable_horizontal_merge: true
-  merge_horizontal_gap: 100
-  merge_max_row_gap: 8
+  merge_horizontal_gap: 150
+  merge_max_row_gap: 12
   merge_min_vertical_overlap_ratio: 0.3
+  enable_adaptive_horizontal_merge: true
+  adaptive_merge_min_gap: 20
+  adaptive_merge_max_gap: 150
+  adaptive_merge_near_ratio: 0.25
+  adaptive_merge_far_ratio: 0.85
 
   # Camera parameters
   camera_frame: "d400_depth_optical_frame"
@@ -26,7 +31,7 @@ umap_node:
   
 tracker_node:
   # params for matching
-  DYNAMIC_IOU_THRESHOLD: 0.08 #0为不筛选
+  DYNAMIC_IOU_THRESHOLD: 0.07 #0为不筛选
   DYNAMIC_DIST_THRESHOLD: 2.5 # 2.0
   iou_weight: 0.3
   dist_weight: 0.7
@@ -38,28 +43,28 @@ tracker_node:
   DYNAMIC_VELOCITY_THRESHOLD: 0.1
   DYNAMIC_VELOCITY_MAX: 5.0
 
-  SUSTAINED_VELOCITY_THRESHOLD: 0.1
-  SUSTAINED_VELOCITY_COUNT: 3
+  SUSTAINED_VELOCITY_THRESHOLD: 0.2
+  SUSTAINED_VELOCITY_COUNT: 2
 
   AVERAGE_DEPLACEMENT_THRESHOLD: 0.1
   HISTORY_SIZE: 5 # History size for pos & vel
   # params for isDynamic
   STATUS_HISTORY_SIZE: 5
-  MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3 # 3
+  MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 2 # 3
 
   # Visualization frame id
-  COARSE_VIS_FRAME: "d400_depth_optical_frame"
+  COARSE_VIS_FRAME: "d400_link" #d400_depth_optical_frame
 
 rematch_node:
   SIMILARITY_THRESHOLD: 0.35 # 0.5
   SIMILARITY_WEIGHT: 0.5
 
-  IOU_THRESHOLD: 0.1 # set to negative to disabe IOU filtering
+  IOU_THRESHOLD: -0.1 # set to negative to disabe IOU filtering
   IOU_WEIGHT: 0.7
   
   DISTANCE_THRESHOLD: 2.0 # 1.5
   DISTANCE_WEIGHT: 0.5
   MAX_TRACKER_AGE : 5.0 # seconds, max age of a tracker without updates
   UNMATCHED_PUBLISH_TIMEOUT: 1.0 # seconds, how long to keep publishing unmatched trackers
-  EXPANSION_RATE: 10.0 # per second dimension expansion rate for dynamic trackers
-  REMATCH_VIS_FRAME: "d400_depth_optical_frame"
+  EXPANSION_RATE: 3.0 # per second dimension expansion rate for dynamic trackers
+  REMATCH_VIS_FRAME: "d400_link" #d400_depth_optical_frame

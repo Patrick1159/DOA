@@ -8,7 +8,7 @@ import time
 from config_manager import ExtractorConfig
 import numpy as np
 
-sys.path.append("/home/patrick/FastSAM/")
+sys.path.append("/home/user/FastSAM/")
 from fastsam import FastSAM, FastSAMPrompt
 
 class ModelManager:

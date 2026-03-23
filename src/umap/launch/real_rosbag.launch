@@ -6,11 +6,11 @@
     
     <param name="use_sim_time" value="true" />
     <!-- Launch RViz for visualization -->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/cius/DOA/src/umap/rviz/benchmark.rviz" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/user/simulation_framework/src/DOA/src/umap/rviz/benchmark.rviz" />
 
     <!-- UMAP -->
     <!-- Load parameters -->
-    <rosparam command="load" file="$(find umap)/config/rosbag_param.yaml" />
+    <rosparam command="load" file="$(find umap)/config/rosbag.yaml" />
     
     <!-- Launch main node -->
     <node pkg="umap" type="umap_extract" name="umap_node" output="screen">
@@ -19,12 +19,12 @@
     </node>
 
     <!-- COARSE -->
-    <rosparam command="load" file="$(find umap)/config/rosbag_param.yaml" />
+    <rosparam command="load" file="$(find umap)/config/rosbag.yaml" />
     <!-- <param name="use_sim_time" value="true" /> -->
     <node pkg="umap" type="coarse_match" name="coarse_match_tracker" output="screen" />
 
     <!-- DETAILED -->
-    <rosparam command="load" file="$(find umap)/config/rosbag_param.yaml" />
+    <rosparam command="load" file="$(find umap)/config/rosbag.yaml" />
     <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
 
     <!-- Feature Extractor -->
@@ -57,7 +57,7 @@
     </node>
 
     <!-- TF -->
-    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_odom" args="-2.3 0.3 -0.1 0 0 0 world odom" /> -->
-    <!-- <node pkg="tf2_ros" type="static_transform_publisher" name="odom_to_t265_link" args="0 0 0 0 0 0 odom t265_link" /> -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_odom" args="-2.3 0.3 -0.1 0 0 0 world odom" />
+    <node pkg="tf2_ros" type="static_transform_publisher" name="odom_to_t265_link" args="0 0 0 0 0 0 odom t265_link" />
     <node pkg="tf2_ros" type="static_transform_publisher" name="t265_to_d400_depth_optical_frame" args="0 0 0 1.57 0 0 t265_link d400_depth_optical_frame" />
 </launch>
