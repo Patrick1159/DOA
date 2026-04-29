@@ -303,11 +303,15 @@ void rematchNode::deleteRemovedTrackerMarkers(
     }
 }
 
-// Helper function: Clean up stale tracker paths
+// Helper function: Clean up stale tracker paths (keyed by tracker_id; compare
+// against the full set of still-alive trackers, not id_mapping_ which only
+// contains matched-this-frame trackers).
 void rematchNode::cleanupStalePaths() {
+    std::set<int> alive_ids;
+    for (const auto& t : trackers_) alive_ids.insert(t.track_id);
     for (auto it = tracker_paths_.begin(); it != tracker_paths_.end();) {
         int tracker_id = it->first;
-        if (id_mapping_.find(tracker_id) == id_mapping_.end()) {
+        if (alive_ids.find(tracker_id) == alive_ids.end()) {
             ROS_DEBUG_NAMED("visualization", "[Path] Cleaning up stale path for tracker ID: %d", tracker_id);
             it = tracker_paths_.erase(it);
         } else {

@@ -5,6 +5,10 @@ void trackerNode::publishVisualization() {
     const std::string kFrameId = params_.COARSE_VIS_FRAME;
     ros::Time current_time = curr_boxes3D_raw_.header.stamp; // keep stamp equal to image stamp
 
+    // Track which tracker IDs produced cube markers this frame; used below to
+    // emit per-ID DELETE markers for trackers that disappeared since last frame.
+    std::set<int> current_published_ids;
+
     // Helper: resolve mapping.first (track_id) to tracker vector index and tracker_id
     auto resolveMapping = [this](int mapping_first, int& tracker_index_out, int& tracker_id_out) -> bool {
         int tracker_idx = mapping_first;      // mapping.first is a track_id
@@ -33,7 +37,7 @@ void trackerNode::publishVisualization() {
     };
 
     // 1) Publish 3D cube markers and paths
-    auto publishCubesAndPaths = [this, &kFrameId, &current_time, &resolveMapping]() {
+    auto publishCubesAndPaths = [this, &kFrameId, &current_time, &resolveMapping, &current_published_ids]() {
         visualization_msgs::MarkerArray marker_array;
 
         for (const auto& mapping : id_mapping_) {
@@ -44,8 +48,8 @@ void trackerNode::publishVisualization() {
             int tracker_index = -1, tracker_id = -1;
             if (!resolveMapping(tracker_idx, tracker_index, tracker_id)) continue;
 
-            // 0. Check if tracker is dynamic
-            bool is_dynamic = isDynamicTracker(trackers_[tracker_index]);
+            // 0. Check if tracker is dynamic (state updated in matchAndUpdate)
+            bool is_dynamic = trackers_[tracker_index].isDynamic;
             // if (!is_dynamic) continue; // Skip static obstacles
             // if (!trackers_[tracker_index].isDynamic) continue; // Skip obstacles that are not consistently dynamic
 
@@ -85,30 +89,31 @@ void trackerNode::publishVisualization() {
             marker.color.a = 0.8;
 
             marker_array.markers.push_back(marker);
+            current_published_ids.insert(tracker_id);
 
             // Path info (unchanged logic)
             geometry_msgs::PoseStamped pose;
             pose.header = marker.header;
             pose.pose.position = marker.pose.position;
 
-            // Create or update path for this tracker
-            if (tracker_paths_.find(tracker_index) == tracker_paths_.end()) {
-                tracker_paths_[tracker_index] = std::vector<geometry_msgs::PoseStamped>();
+            // Create or update path for this tracker (keyed by stable tracker_id, not vector index)
+            if (tracker_paths_.find(tracker_id) == tracker_paths_.end()) {
+                tracker_paths_[tracker_id] = std::vector<geometry_msgs::PoseStamped>();
             }
 
             // Add new position to path
-            tracker_paths_[tracker_index].push_back(pose);
+            tracker_paths_[tracker_id].push_back(pose);
 
             // Limit path length
-            if (tracker_paths_[tracker_index].size() > max_path_length_) {
-                tracker_paths_[tracker_index].erase(tracker_paths_[tracker_index].begin());
+            if (tracker_paths_[tracker_id].size() > max_path_length_) {
+                tracker_paths_[tracker_id].erase(tracker_paths_[tracker_id].begin());
             }
 
             // Create and publish path
             nav_msgs::Path path;
             path.header.frame_id = kFrameId;
             path.header.stamp = current_time;
-            path.poses = tracker_paths_[tracker_index];
+            path.poses = tracker_paths_[tracker_id];
 
             // Add path visualization marker
             visualization_msgs::Marker path_marker;
@@ -122,7 +127,7 @@ void trackerNode::publishVisualization() {
             path_marker.color.a = 0.5; // more transparent than the cube
 
             // Convert path poses to points
-            for (const auto& path_pose : tracker_paths_[tracker_index]) {
+            for (const auto& path_pose : tracker_paths_[tracker_id]) {
                 geometry_msgs::Point point;
                 point = path_pose.pose.position;
                 path_marker.points.push_back(point);
@@ -132,7 +137,21 @@ void trackerNode::publishVisualization() {
             path_pub_.publish(path);
         } // end of for loop
 
-        // If no dynamic obstacles were found, publish an empty marker to clear previous markers
+        // Emit per-ID DELETE markers for trackers that were published last frame
+        // but not this frame (cube + text share the same ID space).
+        for (int old_id : last_published_ids_) {
+            if (current_published_ids.find(old_id) != current_published_ids.end()) continue;
+            visualization_msgs::Marker del_cube;
+            del_cube.header.frame_id = kFrameId;
+            del_cube.header.stamp = current_time;
+            del_cube.ns = "tracked_obstacles";
+            del_cube.id = old_id;
+            del_cube.action = visualization_msgs::Marker::DELETE;
+            marker_array.markers.push_back(del_cube);
+        }
+
+        // If no markers at all were produced this frame, fall back to DELETEALL
+        // to clean up any stragglers.
         if (marker_array.markers.empty()) {
             visualization_msgs::Marker clear_marker;
             clear_marker.header.frame_id = kFrameId;
@@ -142,9 +161,14 @@ void trackerNode::publishVisualization() {
             marker_array.markers.push_back(clear_marker);
         }
 
-        // Clean up paths for removed trackers (unchanged)
+        // Clean up paths for removed trackers: key is tracker_id, so compare
+        // against the set of still-alive tracker IDs (NOT id_mapping_, which
+        // only contains matched-this-frame trackers and would prematurely
+        // drop paths of unmatched-but-alive trackers).
+        std::set<int> alive_ids;
+        for (const auto& t : trackers_) alive_ids.insert(t.track_id);
         for (auto it = tracker_paths_.begin(); it != tracker_paths_.end();) {
-            if (id_mapping_.find(it->first) == id_mapping_.end()) {
+            if (alive_ids.find(it->first) == alive_ids.end()) {
                 it = tracker_paths_.erase(it);
             } else {
                 ++it;
@@ -156,7 +180,7 @@ void trackerNode::publishVisualization() {
     };
 
     // 2) Publish text markers
-    auto publishTextMarkers = [this, &kFrameId, &current_time, &resolveMapping]() {
+    auto publishTextMarkers = [this, &kFrameId, &current_time, &resolveMapping, &current_published_ids]() {
         visualization_msgs::MarkerArray text_marker_array;
 
         for (const auto& mapping : id_mapping_) {
@@ -167,8 +191,8 @@ void trackerNode::publishVisualization() {
             int tracker_index = -1, tracker_id = -1;
             if (!resolveMapping(tracker_idx, tracker_index, tracker_id)) continue;
 
-            // 0. Check if tracker is dynamic
-            bool is_dynamic = isDynamicTracker(trackers_[tracker_index]);
+            // 0. Check if tracker is dynamic (state updated in matchAndUpdate)
+            bool is_dynamic = trackers_[tracker_index].isDynamic;
             if (!is_dynamic) continue; // Skip static obstacles
             if (!trackers_[tracker_index].isDynamic) continue; // Skip obstacles that are not consistently dynamic
 
@@ -214,6 +238,20 @@ void trackerNode::publishVisualization() {
             text_marker_array.markers.push_back(text_marker);
         }
 
+        // Emit per-ID DELETE markers for text markers of trackers that
+        // disappeared. (Sending DELETE for an ID with no prior text marker is
+        // harmless — RViz will ignore it.)
+        for (int old_id : last_published_ids_) {
+            if (current_published_ids.find(old_id) != current_published_ids.end()) continue;
+            visualization_msgs::Marker del_text;
+            del_text.header.frame_id = kFrameId;
+            del_text.header.stamp = current_time;
+            del_text.ns = "tracked_obstacles_text";
+            del_text.id = old_id;
+            del_text.action = visualization_msgs::Marker::DELETE;
+            text_marker_array.markers.push_back(del_text);
+        }
+
         if (text_marker_array.markers.empty()) {
             visualization_msgs::Marker clear_marker;
             clear_marker.header.frame_id = kFrameId;
@@ -240,8 +278,8 @@ void trackerNode::publishVisualization() {
             int tracker_index = -1, tracker_id = -1;
             if (!resolveMapping(tracker_idx, tracker_index, tracker_id)) continue;
 
-            // 0. Check if tracker is dynamic
-            bool is_dynamic = isDynamicTracker(trackers_[tracker_index]);
+            // 0. Check if tracker is dynamic (state updated in matchAndUpdate)
+            bool is_dynamic = trackers_[tracker_index].isDynamic;
             if (!is_dynamic) continue; // Skip static obstacles
             if (!trackers_[tracker_index].isDynamic) continue; // Skip obstacles that are not consistently dynamic
 
@@ -299,9 +337,7 @@ void trackerNode::publishVisualization() {
             double time_since_update = current_time.toSec() - tracker.getLastUpdateTime();
             if (time_since_update > params_.UNMATCHED_PUBLISH_TIMEOUT) continue; // stop after unmatched publish timeout
 
-            // Check dynamic status
-            // Note: isDynamicTracker mutates tracker.isDynamic as side-effect
-            if (!isDynamicTracker(const_cast<onboardDetector::ObstacleTracker&>(tracker))) continue;
+            // Check dynamic status (state already refreshed in matchAndUpdate)
             if (!tracker.isDynamic) continue;
 
             auto state = tracker.getState();
@@ -370,4 +406,8 @@ void trackerNode::publishVisualization() {
     publishCubesAndPaths();
     publishTextMarkers();
     publishObstaclesMsg();
+
+    // Remember which IDs we actively published this frame, so next frame can
+    // emit DELETE markers for any that drop out.
+    last_published_ids_ = current_published_ids;
 }

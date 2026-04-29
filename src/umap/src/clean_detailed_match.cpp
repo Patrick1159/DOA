@@ -1,6 +1,7 @@
 /// @file  rematch.cpp
 /// @brief Second filter, to rematch the dynamic obstacles
 #include <umap/rematch.h>
+#include <umap/match_utils.hpp>
 #include <munkres/munkres.h>
 #include <numeric>           // For std::inner_product
 
@@ -29,7 +30,7 @@ rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh)
     nh_.param("rematch_node/DISTANCE_THRESHOLD", rematch_params_.DISTANCE_THRESHOLD, 0.1);
     nh_.param("rematch_node/DISTANCE_WEIGHT", rematch_params_.DISTANCE_WEIGHT, 0.5);
     nh_.param("rematch_node/REMATCH_VIS_FRAME", rematch_params_.REMATCH_VIS_FRAME, std::string("camera_color_optical_frame"));
-    nh_.param("rematch_node/MAX_TRACKER_AGE", rematch_params_.MAX_TRACKER_AGE, 0.0);
+    nh_.param("rematch_node/MAX_TRACKER_AGE", rematch_params_.MAX_TRACKER_AGE, 1.0);
     nh_.param("rematch_node/UNMATCHED_PUBLISH_TIMEOUT", rematch_params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5);
     nh_.param("rematch_node/EXPANSION_RATE", rematch_params_.EXPANSION_RATE, 0.3);
 
@@ -229,40 +230,9 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
             Eigen::Vector3d size_detection = measurements[j].dimension;
 
             // Calculate IoU between tracker and detection bounding boxes
-            double iou = 0.0;
+            double iou = umap::match_utils::computeIoU3D(
+                center_box, size_tracker, center_detection, size_detection);
             double distance = (center_box - center_detection).norm();
-
-            // Calculate 3D boundaries for tracker and detection
-            std::array<std::pair<double, double>, 3> tracker_bounds, detection_bounds;
-            for (int k = 0; k < 3; ++k) {
-                tracker_bounds[k] = {
-                    center_box[k] - size_tracker[k] / 2.0,
-                    center_box[k] + size_tracker[k] / 2.0
-                };
-                detection_bounds[k] = {
-                    center_detection[k] - size_detection[k] / 2.0,
-                    center_detection[k] + size_detection[k] / 2.0
-                };
-            }
-
-            // Calculate intersection volume
-            double intersection_volume = 1.0;
-            for (int k = 0; k < 3; ++k) {
-                double min_bound = std::max(tracker_bounds[k].first, detection_bounds[k].first);
-                double max_bound = std::min(tracker_bounds[k].second, detection_bounds[k].second);
-                double overlap = std::max(0.0, max_bound - min_bound);
-                intersection_volume *= overlap;
-            }
-
-            // Calculate union volume
-            double tracker_volume = size_tracker[0] * size_tracker[1] * size_tracker[2];
-            double detection_volume = size_detection[0] * size_detection[1] * size_detection[2];
-            double union_volume = tracker_volume + detection_volume - intersection_volume;
-
-            // Compute IoU
-            if (union_volume > 0.0) {
-                iou = intersection_volume / union_volume;
-            }
 
             // 2. Cosine similarity for CLIP features
             const auto &feature1 = trackers[i].obcstacleClipFeatures;
@@ -330,62 +300,8 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
 }
 
 
-/// @brief Find unmatched detection indices
-/// @param matches Matched pairs from association
-/// @param num_detections Total number of detections
-/// @return Vector of unmatched detection indices
-std::vector<int> findUnmatchedDetections(
-    const std::vector<std::pair<int, int>> &matches,
-    const int num_detections)
-{
-
-    std::vector<bool> matched(num_detections, false);
-    std::vector<int> unmatched;
-
-    // Mark matched detections
-    for (const auto &match : matches)
-    {
-        matched[match.second] = true;
-    }
-
-    // Collect unmatched detections
-    for (int i = 0; i < num_detections; ++i)
-    {
-        if (!matched[i])
-        {
-            unmatched.push_back(i);
-        }
-    }
-
-    return unmatched;
-}
-
-/// @brief Update tracker lifecycle and remove stale trackers
-/// @param trackers Vector of trackers
-/// @param current_time Current timestamp
-void updateTrackerLifecycles(std::vector<onboardDetector::ObstacleTracker> &trackers, double current_time, const double max_age) {
-    if (trackers.empty() || max_age <= 0.0 ) {
-        return;
-    }
-    
-    auto it = trackers.begin();
-    while (it != trackers.end())
-    {
-        double time_since_update = current_time - it->getLastUpdateTime();
-        // ROS_INFO_STREAM("Tracker ID: " << it->track_id << " last time: " << it->getLastUpdateTime()
-        //                               << "\t current time: " << current_time
-        //                               << "\t age: " << time_since_update << "s");
-        if (time_since_update > max_age)
-        {
-            // ROS_INFO_STREAM("Removing stale tracker ID: " << it->track_id << " (age: " << time_since_update << "s)");
-            it = trackers.erase(it);
-        }
-        else
-        {
-            ++it;
-        }
-    }
-}
+// findUnmatchedDetections / updateTrackerLifecycles moved to
+// <umap/match_utils.hpp> for reuse between coarse and detailed match nodes.
 
 /// @brief Associates trackers with detections using the Munkres algorithm.
 /// @param cost_matrix
@@ -531,7 +447,7 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
 
     // 4. 处理未匹配的检测: 将其作为new_tracker加入
     // 4.1. 找到未匹配的detections
-    std::vector<int> unmatched = findUnmatchedDetections(matched_pairs, curr_obstacles.size());
+    std::vector<int> unmatched = umap::match_utils::findUnmatchedDetections(matched_pairs, curr_obstacles.size());
     // 4.2. 创建new_tracker并加入
     for (int idx : unmatched) {
         ROS_INFO_STREAM("Creating new tracker for unmatched detection " << idx);
@@ -608,7 +524,9 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
     }
 
     // 7. 更新tracker的生命周期
-    updateTrackerLifecycles(trackers_, current_time, rematch_params_.MAX_TRACKER_AGE);
+    umap::match_utils::removeStaleTrackers(
+        trackers_, current_time, rematch_params_.MAX_TRACKER_AGE,
+        [](int /*dead_id*/) { /* detailed node has no per-tracker caches to prune */ });
 
     // ── Profiling: matchAndUpdate done ────────────────────────────────────────
     tp_update_done_ = std::chrono::steady_clock::now();

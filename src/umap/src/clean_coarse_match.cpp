@@ -1,6 +1,7 @@
 /// @brief First filter, to filter out the dynamic obstacles
 
-#include <umap/coarse_match.h> 
+#include <umap/coarse_match.h>
+#include <umap/match_utils.hpp>
 #include <umap/utils.h>
 #include <munkres/munkres.h> // Include Munkres header
 
@@ -289,55 +290,10 @@ Eigen::MatrixXd trackerNode::getCost_matrix(vector<onboardDetector::ObstacleTrac
                 Eigen::Vector3d size_tracker = trackers[i].box_dimensions;
                 Eigen::Vector3d size_detection = bbox_sizes[j];
                 
-                // 1. IoU cost
-                double iou = 0.0;
-
-                // Calculate 3D boundaries for tracker and detection
-                std::array<std::pair<double, double>, 3> tracker_bounds, detection_bounds;
-                for (int k = 0; k < 3; ++k) {
-                    tracker_bounds[k] = {
-                        center_of_tracker[k] - size_tracker[k] / 2.0,
-                        center_of_tracker[k] + size_tracker[k] / 2.0
-                    };
-                    detection_bounds[k] = {
-                        center_of_detection[k] - size_detection[k] / 2.0,
-                        center_of_detection[k] + size_detection[k] / 2.0
-                    };
-                }
-
-                // Calculate intersection volume
-                // ROS_INFO_STREAM("\033[37m[Coarse IOU] Tracker " << i << " vs Detection " << j << "\033[0m");
-                // ROS_INFO_STREAM("  Tracker bounds: X[" << tracker_bounds[0].first << ", " << tracker_bounds[0].second << "], "
-                                // << "Y[" << tracker_bounds[1].first << ", " << tracker_bounds[1].second << "], "
-                                // << "Z[" << tracker_bounds[2].first << ", " << tracker_bounds[2].second << "]");
-                // ROS_INFO_STREAM("  Detection bounds: X[" << detection_bounds[0].first << ", " << detection_bounds[0].second << "], "
-                                // << "Y[" << detection_bounds[1].first << ", " << detection_bounds[1].second << "], "
-                                // << "Z[" << detection_bounds[2].first << ", " << detection_bounds[2].second << "]");
-                double intersection_volume = 1.0;
-                bool has_overlap = true;
-                for (int k = 0; k < 3; ++k) {
-                    double min_bound = std::max(tracker_bounds[k].first, detection_bounds[k].first);
-                    double max_bound = std::min(tracker_bounds[k].second, detection_bounds[k].second);
-                    double overlap = std::max(0.0, max_bound - min_bound);
-                    if (overlap == 0.0) {
-                        has_overlap = false;
-                        break;
-                    }
-                    intersection_volume *= overlap;
-                }
-                if (!has_overlap) {
-                    intersection_volume = 0.0;
-                }
-
-                // Calculate union volume
-                double tracker_volume = size_tracker[0] * size_tracker[1] * size_tracker[2];
-                double detection_volume = size_detection[0] * size_detection[1] * size_detection[2];
-                double union_volume = tracker_volume + detection_volume - intersection_volume;
-
-                // Compute IoU
-                if (union_volume > 0.0) {
-                    iou = intersection_volume / union_volume;
-                }
+                // 1. IoU cost (volumetric IoU between tracker and detection AABBs)
+                double iou = umap::match_utils::computeIoU3D(
+                    center_of_tracker, size_tracker,
+                    center_of_detection, size_detection);
                 double iou_cost = 1.0 - iou;
                 
                 // 2. Distance cost (Euclidean)
@@ -376,49 +332,8 @@ Eigen::MatrixXd trackerNode::getCost_matrix(vector<onboardDetector::ObstacleTrac
 }
 
 
-/// @brief Find unmatched detection indices
-/// @param matches Matched pairs from association
-/// @param num_detections Total number of detections
-/// @return Vector of unmatched detection indices in measurements
-std::vector<int> findUnmatchedDetections(const std::vector<std::pair<int, int>>& matches, const int num_detections) {
-    std::vector<bool> matched(num_detections, false);
-    std::vector<int> unmatched;
-    
-    // Mark matched detections
-    for(const auto& match : matches) {
-        matched[match.second] = true;
-    }
-    
-    // Collect unmatched detections
-    for(int i = 0; i < num_detections; ++i) {
-        if(!matched[i]) {
-            unmatched.push_back(i);
-            ROS_INFO_STREAM("Unmatched detection at measurement index: " << i);
-        }
-    }
-    return unmatched;
-}
-
-/// @brief Update tracker lifecycle and remove stale trackers
-/// @param trackers Vector of trackers
-/// @param current_time Current timestamp
-void updateTrackerLifecycles(std::vector<onboardDetector::ObstacleTracker>& trackers, double current_time, const double max_age) {
-    if (trackers.empty() || max_age <= 0.0 ) {
-        return;
-    }
-
-    auto it = trackers.begin();
-    while (it != trackers.end()) {
-        double time_since_update = current_time - it->getLastUpdateTime();
-        if (time_since_update > max_age) {
-            ROS_ERROR_STREAM("Removing stale tracker ID: " << it->track_id 
-                           << " (age: " << time_since_update << "s)");
-            it = trackers.erase(it);
-        } else {
-            ++it;
-        }
-    }
-}
+// findUnmatchedDetections / updateTrackerLifecycles moved to
+// <umap/match_utils.hpp> for reuse between coarse and detailed match nodes.
 
 /// @brief Associates trackers with detections using the Munkres algorithm.
 /// @param cost_matrix 
@@ -598,7 +513,7 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
     }
 
     // Handle unmatched detections
-    std::vector<int> unmatched = findUnmatchedDetections(matched_pairs, measurements.size());
+    std::vector<int> unmatched = umap::match_utils::findUnmatchedDetections(matched_pairs, measurements.size());
     for (int idx : unmatched) {
         onboardDetector::ObstacleTracker new_tracker;
         std::string uuid = umap::generate_uuid();
@@ -628,6 +543,13 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
     }
 
     // Predict for unmatched dynamic trackers so their KF state is up-to-date
+    // Update dynamic status for every tracker exactly once per frame.
+    // Visualization reads `tracker.isDynamic` without calling isDynamicTracker()
+    // again, to avoid corrupting isDynamicHistory with duplicate samples.
+    for (auto& tracker : trackers_) {
+        (void)isDynamicTracker(tracker);
+    }
+
     if (!trackers_.empty()) {
         std::vector<bool> is_tracker_matched(trackers_.size(), false);
         for (const auto& match : matched_pairs) {
@@ -639,18 +561,14 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
             if (is_tracker_matched[i]) continue;
             // Only continue prediction/publishing for dynamic trackers that haven't timed out
             double time_since_update = current_time - trackers_[i].getLastUpdateTime();
-            if (time_since_update <= params_.UNMATCHED_PUBLISH_TIMEOUT) {
-                // Update dynamic status and then predict
-                (void)isDynamicTracker(trackers_[i]);
-                if (trackers_[i].isDynamic) {
-                    // Use dimension expansion prediction for dynamic trackers
-                    trackers_[i].predictOnlyWithDimensionExpansion(current_time, params_.EXPANSION_RATE); // 30% expansion per second
-                    trackers_[i].was_dimension_expanded = true; // Mark as dimension expanded
-                    
-                    ROS_DEBUG_NAMED("Coarse tracker", "[Dimension Expansion] Tracker ID %d: time_since_update=%.3fs, dimensions=[%.3f, %.3f, %.3f]", 
-                                   trackers_[i].track_id, time_since_update, 
-                                   trackers_[i].box_dimensions.x(), trackers_[i].box_dimensions.y(), trackers_[i].box_dimensions.z());
-                }
+            if (time_since_update <= params_.UNMATCHED_PUBLISH_TIMEOUT && trackers_[i].isDynamic) {
+                // Use dimension expansion prediction for dynamic trackers
+                trackers_[i].predictOnlyWithDimensionExpansion(current_time, params_.EXPANSION_RATE); // 30% expansion per second
+                trackers_[i].was_dimension_expanded = true; // Mark as dimension expanded
+
+                ROS_DEBUG_NAMED("Coarse tracker", "[Dimension Expansion] Tracker ID %d: time_since_update=%.3fs, dimensions=[%.3f, %.3f, %.3f]",
+                               trackers_[i].track_id, time_since_update,
+                               trackers_[i].box_dimensions.x(), trackers_[i].box_dimensions.y(), trackers_[i].box_dimensions.z());
             }
         }
     }
@@ -661,8 +579,17 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
         ROS_DEBUG_NAMED("Coarse tracker", "[Tracker] Tracker ID %d -> Measurement ID %d", mapping.first, mapping.second);
     }
 
-    // Update tracker lifecycles
-    updateTrackerLifecycles(trackers_, current_time, params_.MAX_TRACKER_AGE);
+    // Update tracker lifecycles (also prune per-tracker auxiliary caches for
+    // every tracker that gets removed).
+    umap::match_utils::removeStaleTrackers(
+        trackers_, current_time, params_.MAX_TRACKER_AGE,
+        [this](int dead_id) {
+            ROS_WARN_STREAM("[Coarse tracker] Removing stale tracker ID: " << dead_id);
+            last_mask_by_tracker_.erase(dead_id);
+            last_box2d_by_tracker_.erase(dead_id);
+            last_size3d_by_tracker_.erase(dead_id);
+            tracker_paths_.erase(dead_id);
+        });
 
 }
 

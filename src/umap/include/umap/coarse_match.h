@@ -15,6 +15,7 @@
 #include <geometry_msgs/PoseStamped.h>
 #include <std_msgs/ColorRGBA.h>
 #include <array>
+#include <set>
 
 
 class trackerNode{
@@ -60,6 +61,7 @@ private:
 
     std::map<int, std::vector<geometry_msgs::PoseStamped>> tracker_paths_; // Store historical positions for each tracker
     const size_t max_path_length_ = 100; // Maximum number of historical positions to store
+    std::set<int> last_published_ids_; // Tracker IDs whose cube/text markers were published last frame
 
     // Last observed data per tracker (to continue publishing when unmatched)
     std::map<int, sensor_msgs::Image> last_mask_by_tracker_;
