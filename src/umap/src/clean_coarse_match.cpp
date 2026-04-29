@@ -43,6 +43,12 @@ trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh) {
 
     // Visualization param
     nh_.param("tracker_node/COARSE_VIS_FRAME", params_.COARSE_VIS_FRAME, std::string("camera_color_optical_frame"));
+    // Output frame: frame_id stamped on obstacles_msg / paths consumed downstream.
+    // Defaults to VIS_FRAME so old configs remain backward-compatible.
+    nh_.param("tracker_node/COARSE_OUTPUT_FRAME", params_.COARSE_OUTPUT_FRAME, std::string(""));
+    if (params_.COARSE_OUTPUT_FRAME.empty()) {
+        params_.COARSE_OUTPUT_FRAME = params_.COARSE_VIS_FRAME;
+    }
     ROS_INFO("[Tracker] Node initialized");
 }
 

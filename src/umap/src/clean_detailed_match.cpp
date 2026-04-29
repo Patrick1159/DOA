@@ -30,6 +30,12 @@ rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh)
     nh_.param("rematch_node/DISTANCE_THRESHOLD", rematch_params_.DISTANCE_THRESHOLD, 0.1);
     nh_.param("rematch_node/DISTANCE_WEIGHT", rematch_params_.DISTANCE_WEIGHT, 0.5);
     nh_.param("rematch_node/REMATCH_VIS_FRAME", rematch_params_.REMATCH_VIS_FRAME, std::string("camera_color_optical_frame"));
+    // Output frame: frame_id stamped on tracker_details / obstacles consumed downstream.
+    // Defaults to VIS_FRAME so old configs remain backward-compatible.
+    nh_.param("rematch_node/REMATCH_OUTPUT_FRAME", rematch_params_.REMATCH_OUTPUT_FRAME, std::string(""));
+    if (rematch_params_.REMATCH_OUTPUT_FRAME.empty()) {
+        rematch_params_.REMATCH_OUTPUT_FRAME = rematch_params_.REMATCH_VIS_FRAME;
+    }
     nh_.param("rematch_node/MAX_TRACKER_AGE", rematch_params_.MAX_TRACKER_AGE, 1.0);
     nh_.param("rematch_node/UNMATCHED_PUBLISH_TIMEOUT", rematch_params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5);
     nh_.param("rematch_node/EXPANSION_RATE", rematch_params_.EXPANSION_RATE, 0.3);
@@ -553,7 +559,7 @@ void rematchNode::publishTrackerDetails(double current_time) {
     
     // Set header
     tracker_details_msg.header.stamp = ros::Time::now();
-    tracker_details_msg.header.frame_id = rematch_params_.REMATCH_VIS_FRAME;
+    tracker_details_msg.header.frame_id = rematch_params_.REMATCH_OUTPUT_FRAME;
     
     // Populate tracker data
     for (const auto& tracker : trackers_) {

@@ -2,7 +2,8 @@
 
 /// @brief Publish visualization information, including 3D cubes, text markers, and dynamic obstacle information (Obstacles message type).
 void trackerNode::publishVisualization() {
-    const std::string kFrameId = params_.COARSE_VIS_FRAME;
+    const std::string kFrameId = params_.COARSE_VIS_FRAME;        // RViz markers (cube/text/path)
+    const std::string kOutputFrame = params_.COARSE_OUTPUT_FRAME; // obstacles_msg consumed downstream
     ros::Time current_time = curr_boxes3D_raw_.header.stamp; // keep stamp equal to image stamp
 
     // Track which tracker IDs produced cube markers this frame; used below to
@@ -266,7 +267,7 @@ void trackerNode::publishVisualization() {
     };
 
     // 3) Publish Obstacles message
-    auto publishObstaclesMsg = [this, &kFrameId, &current_time, &resolveMapping]() {
+    auto publishObstaclesMsg = [this, &kFrameId, &kOutputFrame, &current_time, &resolveMapping]() {
         umap::Obstacles obstacles_msg;
 
         // 3.1) First, publish matched dynamic trackers (existing behavior)
@@ -396,9 +397,9 @@ void trackerNode::publishVisualization() {
             obstacles_msg.obstacles_history_pos.push_back(his_path);
         }
 
-        // Publish obstacles message
+        // Publish obstacles message (downstream consumes via OUTPUT frame)
         obstacles_msg.header.stamp = current_time;
-        obstacles_msg.header.frame_id = kFrameId;
+        obstacles_msg.header.frame_id = kOutputFrame;
         obstacles_pub_.publish(obstacles_msg);
     };
 

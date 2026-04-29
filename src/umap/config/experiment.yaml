@@ -54,6 +54,8 @@ tracker_node:
 
   # Visualization frame id
   COARSE_VIS_FRAME: "d400_link" #d400_depth_optical_frame
+  # Output frame id (frame_id stamped on obstacles_msg consumed by mpc_nav)
+  COARSE_OUTPUT_FRAME: "odom"
 
 rematch_node:
   SIMILARITY_THRESHOLD: 0.35 # 0.5
@@ -68,3 +70,5 @@ rematch_node:
   UNMATCHED_PUBLISH_TIMEOUT: 1.0 # seconds, how long to keep publishing unmatched trackers
   EXPANSION_RATE: 3.0 # per second dimension expansion rate for dynamic trackers
   REMATCH_VIS_FRAME: "d400_link" #d400_depth_optical_frame
+  # Output frame id (frame_id stamped on tracker_details consumed by mpc_nav)
+  REMATCH_OUTPUT_FRAME: "odom"

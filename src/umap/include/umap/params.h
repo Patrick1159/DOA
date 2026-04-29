@@ -47,7 +47,8 @@ struct trackerParams{
     double UNMATCHED_PUBLISH_TIMEOUT; // seconds, how long to keep publishing unmatched dynamic trackers
     double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
     
-    std::string COARSE_VIS_FRAME = "camera_color_optical_frame"; // default frame id
+    std::string COARSE_VIS_FRAME = "camera_color_optical_frame"; // visualization frame for RViz markers
+    std::string COARSE_OUTPUT_FRAME = ""; // frame_id stamped on obstacles_msg downstream; empty -> fallback to COARSE_VIS_FRAME
     double AVERAGE_DEPLACEMENT_THRESHOLD; // m threshold for average displacement of a tracker
     int HISTORY_SIZE; // 每个tracker的历史vel和pos留存长度
     int STATUS_HISTORY_SIZE; // 每个tracker的历史STATUS留存长度
@@ -69,6 +70,7 @@ struct rematchParams{
     double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
 
     std::string REMATCH_VIS_FRAME = "camera_color_optical_frame";
+    std::string REMATCH_OUTPUT_FRAME = ""; // frame_id stamped on tracker_details / obstacles downstream; empty -> fallback to REMATCH_VIS_FRAME
 };
 
 #endif // UMAP_PARAMS_H
