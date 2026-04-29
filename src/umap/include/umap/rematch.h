@@ -32,6 +32,7 @@ public:
         Eigen::Vector3d dimension;
         Eigen::Vector2d box2D;
         std::vector<float> feature;
+        float confidence = 1.0f;  // forwarded from upstream Obstacles.confidence
     };
 private:
     ros::NodeHandle& nh_;

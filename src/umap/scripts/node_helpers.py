@@ -18,6 +18,7 @@ _OBSTACLE_FIELDS = (
     'box_ids', 'centroid_x', 'centroid_y', 'centroid_z',
     'thickness', 'height', 'width',
     'box_x', 'box_y', 'box_width', 'box_height',
+    'observed', 'confidence',
 )
 
 

@@ -67,4 +67,11 @@ namespace onboardDetector{
         }
     }
 
+    void kalman_filter::setState(int state_index, double value)
+    {
+        if (this->is_initialized && state_index >= 0 && state_index < this->states.rows()) {
+            this->states(state_index, 0) = value;
+        }
+    }
+
 }

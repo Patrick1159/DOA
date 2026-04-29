@@ -46,7 +46,13 @@ struct trackerParams{
     double MAX_TRACKER_AGE; // seconds, max age of a tracker without updates
     double UNMATCHED_PUBLISH_TIMEOUT; // seconds, how long to keep publishing unmatched dynamic trackers
     double EXPANSION_RATE = 0.3; // per second dimension expansion rate for dynamic trackers
-    
+
+    // Candidate publishing: trackers that have at least 1 KF-estimated velocity
+    // and whose latest |v| > CANDIDATE_VELOCITY_THRESHOLD are published with
+    // confidence=0.5 even before the SUSTAINED hysteresis fires. Set to a
+    // large value (e.g. 1e6) to disable.
+    double CANDIDATE_VELOCITY_THRESHOLD = 0.2;
+
     std::string COARSE_VIS_FRAME = "camera_color_optical_frame"; // visualization frame for RViz markers
     std::string COARSE_OUTPUT_FRAME = ""; // frame_id stamped on obstacles_msg downstream; empty -> fallback to COARSE_VIS_FRAME
     double AVERAGE_DEPLACEMENT_THRESHOLD; // m threshold for average displacement of a tracker

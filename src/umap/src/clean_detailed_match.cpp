@@ -129,6 +129,11 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
         obstacle.dimension = dimension;
         obstacle.box2D = box2D;
         obstacle.feature = feature;
+        // Forward upstream confidence; default 1.0 if the array is short
+        // (back-compat with old upstream that did not populate the field).
+        if (i < dync_obstacle_msg.confidence.size()) {
+            obstacle.confidence = dync_obstacle_msg.confidence[i];
+        }
         curr_obstacles.push_back(obstacle);
 
         ROS_INFO_STREAM("\033[1;35m[Rematch] Receive obstacle " << i 
@@ -442,6 +447,7 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
         if (tracker_idx < trackers_.size() && measurement_idx < curr_obstacles.size()) {
             trackers_[tracker_idx].updateWithFeature(curr_obstacles[measurement_idx].centroid_measurement, curr_obstacles[measurement_idx].dimension,curr_obstacles[measurement_idx].feature, current_time);
             trackers_[tracker_idx].was_dimension_expanded = false; // Reset flag when getting new measurements
+            trackers_[tracker_idx].last_confidence = curr_obstacles[measurement_idx].confidence;
             ROS_DEBUG_NAMED("rematch", "Updating tracker %d with boxSize %f\t%f\t%f", tracker_idx, trackers_[tracker_idx].box_dimensions.x(), trackers_[tracker_idx].box_dimensions.y(), trackers_[tracker_idx].box_dimensions.z()); 
             // id_mapping_[tracker_idx] = measurement_idx;
             int tracker_id = trackers_[tracker_idx].track_id;
@@ -461,6 +467,7 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
 
         new_tracker.initWithFeature(curr_obstacles[idx].centroid_measurement, curr_obstacles[idx].dimension, curr_obstacles[idx].feature, current_time, global_tracker_id_);
         new_tracker.updateWithFeature(curr_obstacles[idx].centroid_measurement, curr_obstacles[idx].dimension, curr_obstacles[idx].feature, current_time);
+        new_tracker.last_confidence = curr_obstacles[idx].confidence;
         trackers_.push_back(new_tracker);
         
         id_mapping_[global_tracker_id_] = idx;
@@ -582,7 +589,8 @@ void rematchNode::publishTrackerDetails(double current_time) {
         
         detail.last_update_time = tracker.getLastUpdateTime();
         detail.age = current_time - tracker.getLastUpdateTime();
-        
+        detail.confidence = tracker.last_confidence;
+
         tracker_details_msg.trackers.push_back(detail);
     }
     ROS_INFO("Publishing tracker details with %zu entries", tracker_details_msg.trackers.size());

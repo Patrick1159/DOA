@@ -25,7 +25,7 @@
 
 namespace onboardDetector {
 
-ObstacleTracker::ObstacleTracker() : initialized(false), dt(0.1), track_id(0), lastUpdateTime(0.0), was_dimension_expanded(false) {}
+ObstacleTracker::ObstacleTracker() : initialized(false), dt(0.1), track_id(0), lastUpdateTime(0.0), update_count(0), was_dimension_expanded(false) {}
 
 void ObstacleTracker::initializeKalmanFilter() {
     const int state_size = 6;  // [x, y, z, vx, vy, vz]
@@ -82,18 +82,21 @@ void ObstacleTracker::init(const Eigen::Vector3d& initial_pos, const Eigen::Vect
     box_dimensions = bounding_box_size; // initialize bounding box size
     original_box_dimensions = bounding_box_size; // store original dimensions
     history_pos.push_back(initial_pos); // Store position history
-    history_vel.push_back(Eigen::Vector3d::Zero()); // Initialize velocity history
+    // Intentionally do NOT push a zero-velocity sample here. The first
+    // entry in history_vel must come from a real update() so that
+    // downstream SUSTAINED_VELOCITY checks see only observed velocities.
     isDynamic = true; // Initialize as dynamic
     was_dimension_expanded = false; // Initialize dimension expansion flag
     initialized = true;
+    update_count = 1; // count init as the first observation
 }
 
 void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const Eigen::Vector3d& bounding_box_size, const std::vector<float> feature, double timestamp, const int newtracker_id) {
     initializeKalmanFilter();
-    
+
     Eigen::MatrixXd states = Eigen::MatrixXd::Zero(6, 1);
     states.block(0, 0, 3, 1) = initial_pos;
-    
+
     track_id = newtracker_id; // Set the ID for the new tracker
 
     obcstacleClipFeatures = feature; // initialize clip feature
@@ -101,7 +104,7 @@ void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const 
     original_box_dimensions = bounding_box_size; // store original dimensions
     lastUpdateTime = timestamp;
     history_pos.push_back(initial_pos); // Store position history
-    history_vel.push_back(Eigen::Vector3d::Zero()); // Initialize velocity history
+    // See note in init() above; keep history_vel empty until first update().
     isDynamic = true; // Initialize as dynamic
     was_dimension_expanded = false; // Initialize dimension expansion flag
     initialized = true;
@@ -110,9 +113,9 @@ void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const 
 
 
 /// @brief Update the Kalman Filter with a new measurement
-/// @param measurement 
-/// @param timestamp 
-void ObstacleTracker::update(const Eigen::Vector3d& measurement, const Eigen::Vector3d& dimensions, double timestamp, int history_size) {   
+/// @param measurement
+/// @param timestamp
+void ObstacleTracker::update(const Eigen::Vector3d& measurement, const Eigen::Vector3d& dimensions, double timestamp, int history_size) {
     if (!initialized) return;
 
     // Calculate actual time step
@@ -124,8 +127,23 @@ void ObstacleTracker::update(const Eigen::Vector3d& measurement, const Eigen::Ve
     } else {
         dt = 0.1; // Fallback for large gaps
     }
-    
+
     updateStateTransitionMatrix();
+
+    // KF velocity warm-start: on the very first update after init(), seed the
+    // KF velocity state from the finite difference of the two observed
+    // positions. Without this, KF velocity converges only after several
+    // frames because H observes position only.
+    if (history_vel.empty() && !history_pos.empty() && dt > 1e-6) {
+        Eigen::Vector3d v_seed = (measurement - history_pos.back()) / dt;
+        // Clamp to a reasonable velocity bound to guard against bad dt /
+        // outlier detections (typical pedestrians / robots well under 5 m/s).
+        const double v_max = 5.0;
+        if (v_seed.norm() > v_max) v_seed = v_seed.normalized() * v_max;
+        kf.setState(3, v_seed.x());
+        kf.setState(4, v_seed.y());
+        kf.setState(5, v_seed.z());
+    }
 
     Eigen::MatrixXd z(3, 1); // Measurement vector
     z << measurement.x(), measurement.y(), measurement.z();
@@ -153,6 +171,7 @@ void ObstacleTracker::update(const Eigen::Vector3d& measurement, const Eigen::Ve
     }
 
     box_dimensions << dimensions.x(), dimensions.y(), dimensions.z(); // width, height, thickness
+    update_count++;
 }
 
 /// @brief Update the Kalman Filter with a new measurement
@@ -176,6 +195,16 @@ void ObstacleTracker::updateWithFeature(const Eigen::Vector3d& measurement, cons
                     track_id, actual_dt, dt, lastUpdateTime, timestamp);
     
     updateStateTransitionMatrix();
+
+    // KF velocity warm-start (see update() for rationale)
+    if (history_vel.empty() && !history_pos.empty() && dt > 1e-6) {
+        Eigen::Vector3d v_seed = (measurement - history_pos.back()) / dt;
+        const double v_max = 5.0;
+        if (v_seed.norm() > v_max) v_seed = v_seed.normalized() * v_max;
+        kf.setState(3, v_seed.x());
+        kf.setState(4, v_seed.y());
+        kf.setState(5, v_seed.z());
+    }
 
     Eigen::MatrixXd z(3, 1); // Measurement vector
     z << measurement.x(), measurement.y(), measurement.z();

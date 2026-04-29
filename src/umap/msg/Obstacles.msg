@@ -28,3 +28,9 @@ nav_msgs/Path[] obstacles_history_pos
 
 # observed
 bool[] observed
+
+# confidence: 1.0 = isDynamic confirmed (passed hysteresis),
+#             0.5 = candidate (early-published, motion suspected but not yet confirmed),
+#             0.0 = static / undecided. Downstream (e.g. MPC) may use this to
+#             tighten/loosen safety margin.
+float32[] confidence

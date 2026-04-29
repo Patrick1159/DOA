@@ -40,6 +40,7 @@ trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh) {
     nh_.param("tracker_node/MAX_TRACKER_AGE", params_.MAX_TRACKER_AGE, 1.0); // seconds
     nh_.param("tracker_node/UNMATCHED_PUBLISH_TIMEOUT", params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5); // seconds, independent of MAX_TRACKER_AGE
     nh_.param("tracker_node/EXPANSION_RATE", params_.EXPANSION_RATE, 0.3); // per second dimension expansion rate for dynamic trackers
+    nh_.param("tracker_node/CANDIDATE_VELOCITY_THRESHOLD", params_.CANDIDATE_VELOCITY_THRESHOLD, 0.2); // candidate early-publish |v| threshold
 
     // Visualization param
     nh_.param("tracker_node/COARSE_VIS_FRAME", params_.COARSE_VIS_FRAME, std::string("camera_color_optical_frame"));

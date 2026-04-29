@@ -50,6 +50,9 @@ namespace onboardDetector{
 
         // read output from the state
         double output(int state_index) const; // Maybe should not be const
+
+        // set a single state component (used for velocity warm-start seeding)
+        void setState(int state_index, double value);
     };
 }
 

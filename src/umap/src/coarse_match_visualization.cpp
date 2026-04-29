@@ -302,6 +302,7 @@ void trackerNode::publishVisualization() {
 
             // Set observed field - true for matched trackers (they have current measurements)
             obstacles_msg.observed.push_back(true);
+            obstacles_msg.confidence.push_back(1.0f);  // confirmed dynamic
 
             // add obstacles path to obstacles_msg
             nav_msgs::Path his_path;
@@ -371,6 +372,7 @@ void trackerNode::publishVisualization() {
 
             // Set observed field - false for unmatched trackers that used dimension expansion
             obstacles_msg.observed.push_back(!tracker.was_dimension_expanded);
+            obstacles_msg.confidence.push_back(1.0f);  // confirmed dynamic, predictive publish
 
             // add obstacles path to obstacles_msg (use existing history_pos)
             nav_msgs::Path his_path;
@@ -394,6 +396,49 @@ void trackerNode::publishVisualization() {
                 
                 his_path.poses.push_back(pose_stamped);
             }
+            obstacles_msg.obstacles_history_pos.push_back(his_path);
+        }
+
+        // 3.3) Candidate early-publish: trackers that are matched this frame
+        // and already have a non-trivial KF velocity, but have not yet passed
+        // the SUSTAINED hysteresis (tracker.isDynamic == false). These are
+        // emitted with confidence = 0.5 so downstream may apply tighter
+        // safety margins without waiting several frames. Skips trackers that
+        // are already published above.
+        std::set<int> already_pub(obstacles_msg.box_ids.begin(), obstacles_msg.box_ids.end());
+        for (const auto& mapping : id_mapping_) {
+            int tracker_id_key = mapping.first;
+            int measurement_id = mapping.second;
+            int tracker_index = -1, tracker_id = -1;
+            if (!resolveMapping(tracker_id_key, tracker_index, tracker_id)) continue;
+            if (already_pub.count(tracker_id)) continue;
+
+            const auto& tracker = trackers_[tracker_index];
+            if (tracker.history_vel.empty()) continue;
+            double v_norm = tracker.history_vel.back().norm();
+            if (v_norm < params_.CANDIDATE_VELOCITY_THRESHOLD) continue;
+            if (v_norm > params_.DYNAMIC_VELOCITY_MAX) continue;  // ignore wild outliers
+
+            auto state = tracker.getState();
+
+            obstacles_msg.box_ids.push_back(tracker_id);
+            obstacles_msg.centroid_x.push_back(state.position.z());
+            obstacles_msg.centroid_y.push_back(-state.position.x());
+            obstacles_msg.centroid_z.push_back(-state.position.y());
+            obstacles_msg.width.push_back(curr_sizes_[measurement_id][2]);
+            obstacles_msg.height.push_back(curr_sizes_[measurement_id][0]);
+            obstacles_msg.thickness.push_back(curr_sizes_[measurement_id][1]);
+            obstacles_msg.mask.push_back(curr_masks_[measurement_id]);
+            obstacles_msg.box_x.push_back(curr_boxes2D_raw_.x[measurement_id]);
+            obstacles_msg.box_y.push_back(curr_boxes2D_raw_.y[measurement_id]);
+            obstacles_msg.box_width.push_back(curr_boxes2D_raw_.width[measurement_id]);
+            obstacles_msg.box_height.push_back(curr_boxes2D_raw_.height[measurement_id]);
+            obstacles_msg.observed.push_back(true);
+            obstacles_msg.confidence.push_back(0.5f);  // candidate
+
+            nav_msgs::Path his_path;
+            his_path.header.frame_id = kFrameId;
+            his_path.header.stamp = current_time;
             obstacles_msg.obstacles_history_pos.push_back(his_path);
         }
 
