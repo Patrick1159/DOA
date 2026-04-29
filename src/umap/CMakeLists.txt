@@ -74,7 +74,9 @@ include_directories(
 add_library(${PROJECT_NAME}
     include/umap/KalmanFilter.cpp
     include/umap/ObstacleTracker.cpp
-    include/umap/umapProcess.cpp     
+    include/umap/umapProcess.cpp
+    include/umap/umap_bbox_extraction.cpp
+    include/umap/umap_visualization.cpp
     include/umap/umapVisualisation.cpp
 )
 
@@ -119,10 +121,6 @@ add_executable(detailed_match
 # target_link_libraries(static_transform_node
 #   ${catkin_LIBRARIES}
 # )
-
-# costmap generation node
-add_executable(costmap_generator src/costmap_generator.cpp)
-target_link_libraries(costmap_generator ${catkin_LIBRARIES})
 
 # final frame convertion
 add_executable(bbox_frame_converter src/convert_bbox_frame.cpp)
