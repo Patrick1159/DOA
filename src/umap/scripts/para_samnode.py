@@ -10,12 +10,17 @@ import numpy as np
 import torch
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
-from std_msgs.msg import Float32MultiArray
 from umap.msg import BoundingBoxes2D, BoundingBoxes3D, SegmentedImage, MultiImageFeatures, Obstacles, RematchStatistics
 
 from config_manager import ExtractorConfig
 from model_manager import ModelManager
 from utils import ImageProcessor, ColorGenerator
+from node_helpers import (
+    convert_image_message,
+    make_visualization_image,
+    make_mask_debug_visualization,
+    build_obstacles_message,
+)
 
 
 class PrarSamNode:
@@ -69,11 +74,10 @@ class PrarSamNode:
         
     def _handle_image_message(self, image_msg):
         """Handle incoming image messages"""
-        try:
-            self.current_image = self.bridge.imgmsg_to_cv2(image_msg, "bgr8")
+        img = convert_image_message(self.bridge, image_msg)
+        if img is not None:
+            self.current_image = img
             rospy.logdebug("Received image message")
-        except Exception as e:
-            rospy.logerr(f"Image conversion failed: {e}")
 
     def _process_dynamic_obstacles(self, obstacles_msg):
         """Process dynamic obstacles and extract features"""
@@ -93,12 +97,13 @@ class PrarSamNode:
                 obstacles_msg)
             
             # Create visualizations
-            vis_image = self._create_visualization_image(
-                obstacles_msg, valid_rois)
-            
+            vis_image = make_visualization_image(
+                self.current_image, obstacles_msg, valid_rois,
+                self.color_generator, self.config)
+
             # Create mask debug visualization
-            mask_debug_vis = self._create_mask_debug_visualization(
-                obstacles_msg, masks)
+            mask_debug_vis = make_mask_debug_visualization(
+                self.image_processor, self.current_image, obstacles_msg, masks)
             
             # Publish all results
             self._publish_results(obstacles_msg=obstacles_msg, features=extracted_features, 
@@ -313,57 +318,15 @@ class PrarSamNode:
         
         return result
     def _create_visualization_image(self, obstacles_msg, valid_rois):
-        """Create visualization image with bounding boxes and labels"""
-        vis_image = self.current_image.copy()
-        
-        try:
-            for i, box_id in enumerate(obstacles_msg.box_ids[:len(valid_rois)]):
-                # Get box coordinates
-                box_x = obstacles_msg.box_x[i]
-                box_y = obstacles_msg.box_y[i]
-                box_width = obstacles_msg.box_width[i]
-                box_height = obstacles_msg.box_height[i]
-                
-                # Draw bounding box
-                color = self.color_generator.get_color(i)
-                cv2.rectangle(vis_image, 
-                             (box_x, box_y), 
-                             (box_x + box_width, box_y + box_height), 
-                             color, 2)
-                
-                # Add label
-                cv2.putText(vis_image, f"ID:{box_id}", 
-                           (box_x, box_y - 5), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 
-                           self.config.FONT_SCALE, 
-                           color, 
-                           self.config.FONT_THICKNESS)
-            
-            return vis_image
-            
-        except Exception as e:
-            rospy.logerr(f"Visualization creation failed: {e}")
-            return self.current_image.copy()
-    
+        """Backwards-compatible wrapper around node_helpers.make_visualization_image."""
+        return make_visualization_image(
+            self.current_image, obstacles_msg, valid_rois,
+            self.color_generator, self.config)
+
     def _create_mask_debug_visualization(self, obstacles_msg, masks):
-        """Create debug visualization for masks"""
-        try:
-            # Prepare box information for visualization
-            boxes = []
-            for i in range(len(obstacles_msg.box_ids)):
-                box = (obstacles_msg.box_x[i], obstacles_msg.box_y[i], 
-                      obstacles_msg.box_width[i], obstacles_msg.box_height[i])
-                boxes.append(box)
-            
-            # Create mask visualization
-            mask_debug_image = self.image_processor.create_mask_visualization(
-                self.current_image, masks, obstacles_msg.box_ids, boxes)
-            
-            return mask_debug_image
-            
-        except Exception as e:
-            rospy.logerr(f"Mask debug visualization creation failed: {e}")
-            return None
+        """Backwards-compatible wrapper around node_helpers.make_mask_debug_visualization."""
+        return make_mask_debug_visualization(
+            self.image_processor, self.current_image, obstacles_msg, masks)
     
     def _publish_results(self, obstacles_msg, features, valid_rois, 
                         vis_image, mask_debug_vis, processing_stats, binary_mask, overlay_image=None):
@@ -436,33 +399,8 @@ class PrarSamNode:
             rospy.logerr(f"Result publishing failed: {e}")
     
     def _create_obstacles_message(self, original_msg, features, binary_mask):
-        """Create obstacles message with extracted features"""
-        processed_msg = Obstacles()
-        processed_msg.header = original_msg.header
-        
-        # Copy obstacle data
-        for attr in ['box_ids', 'centroid_x', 'centroid_y', 'centroid_z',
-                    'thickness', 'height', 'width', 'box_x', 'box_y',
-                    'box_width', 'box_height']:
-            setattr(processed_msg, attr, getattr(original_msg, attr))
-        
-        # Add features
-        processed_msg.features = []
-        for feature in features:
-            feature_msg = Float32MultiArray()
-            feature_msg.data = feature.flatten().tolist()
-            processed_msg.features.append(feature_msg)
-        
-        # Add masks
-        processed_msg.binary_mask.header = original_msg.header
-        processed_msg.binary_mask.data = binary_mask.flatten().tolist()
-        processed_msg.binary_mask.height = binary_mask.shape[0]
-        processed_msg.binary_mask.width = binary_mask.shape[1]
-        processed_msg.binary_mask.encoding = "mono8"
-        processed_msg.binary_mask.is_bigendian = 0
-        processed_msg.binary_mask.step = binary_mask.shape[1]
-        
-        return processed_msg
+        """Create obstacles message with extracted features and binary mask"""
+        return build_obstacles_message(original_msg, features, binary_mask=binary_mask)
 
 def update_params(ExtractorConfig):
     """Update parameters from ROS parameter server"""

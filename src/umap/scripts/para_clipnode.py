@@ -10,12 +10,15 @@ import numpy as np
 import torch
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
-from std_msgs.msg import Float32MultiArray
 from umap.msg import BoundingBoxes2D, BoundingBoxes3D, SegmentedImage, MultiImageFeatures, Obstacles, RematchStatistics
 
 from config_manager import ExtractorConfig
 from model_manager import ModelManager
 from utils import ImageProcessor, ColorGenerator
+from node_helpers import (
+    convert_image_message,
+    build_obstacles_message,
+)
 
 class ParaClipNode:
     def __init__(self):
@@ -60,11 +63,10 @@ class ParaClipNode:
         
     def _handle_image_message(self, image_msg):
         """Handle incoming image messages"""
-        try:
-            self.current_image = self.bridge.imgmsg_to_cv2(image_msg, "bgr8")
+        img = convert_image_message(self.bridge, image_msg)
+        if img is not None:
+            self.current_image = img
             rospy.logdebug("Received image message")
-        except Exception as e:
-            rospy.logerr
     
     def _process_dynamic_obstacles(self, obstacles_msg):
         """Process dynamic obstacles and extract features"""
@@ -222,33 +224,8 @@ class ParaClipNode:
             rospy.logerr(f"Result publishing failed: {e}")
 
     def _create_obstacles_message(self, original_msg, features, binary_mask):
-        """Create obstacles message with extracted features"""
-        processed_msg = Obstacles()
-        processed_msg.header = original_msg.header
-        
-        # Copy obstacle data
-        for attr in ['box_ids', 'centroid_x', 'centroid_y', 'centroid_z',
-                    'thickness', 'height', 'width', 'box_x', 'box_y',
-                    'box_width', 'box_height']:
-            setattr(processed_msg, attr, getattr(original_msg, attr))
-        
-        # Add features
-        processed_msg.features = []
-        for feature in features:
-            feature_msg = Float32MultiArray()
-            feature_msg.data = feature.flatten().tolist()
-            processed_msg.features.append(feature_msg)
-        
-        # Add masks
-        processed_msg.binary_mask.header = original_msg.header
-        processed_msg.binary_mask.data = binary_mask.flatten().tolist()
-        processed_msg.binary_mask.height = binary_mask.shape[0]
-        processed_msg.binary_mask.width = binary_mask.shape[1]
-        processed_msg.binary_mask.encoding = "mono8"
-        processed_msg.binary_mask.is_bigendian = 0
-        processed_msg.binary_mask.step = binary_mask.shape[1]
-        
-        return processed_msg
+        """Create obstacles message with extracted features and binary mask"""
+        return build_obstacles_message(original_msg, features, binary_mask=binary_mask)
     
 
 
