@@ -20,6 +20,12 @@ struct umapParams {
     int merge_max_row_gap = 8;
     float merge_min_vertical_overlap_ratio = 0.3f;
 
+    bool enable_adaptive_horizontal_merge = true;
+    int adaptive_merge_min_gap = 20;
+    int adaptive_merge_max_gap = 100;
+    float adaptive_merge_near_ratio = 0.25f;
+    float adaptive_merge_far_ratio = 0.85f;
+
     std::string camera_frame = "camera_color_optical_frame"; // default frame id
     float fx = 525.0;
     float fy = 525.0;
