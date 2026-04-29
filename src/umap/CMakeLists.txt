@@ -101,6 +101,7 @@ add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EX
 # coarse match
 add_executable(coarse_match
     src/clean_coarse_match.cpp
+    src/coarse_matcher.cpp
     src/coarse_match_visualization.cpp
 )
 
@@ -115,6 +116,7 @@ add_executable(umap_extract
 # detailed match
 add_executable(detailed_match
     src/clean_detailed_match.cpp
+    src/detailed_matcher.cpp
     src/detailed_match_visualization.cpp
 )
 
