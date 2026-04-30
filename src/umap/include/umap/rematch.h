@@ -2,16 +2,14 @@
 
 #include <umap/KalmanFilter.h>
 #include <umap/ObstacleTracker.h>
-#include <umap/umapProcess.h>
-#include <umap/umapType.h>
+#include <umap/params.h>
+#include <umap/Obstacles.h>
 #include <umap/TrackerDetailArray.h>
 #include <umap/RematchStatistics.h>
 
 #include <Eigen/Dense>
 #include <vector>
-#include <thread>
 #include <chrono>
-#include <iostream>
 #include <ros/ros.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <nav_msgs/Path.h>
@@ -25,8 +23,6 @@ public:
     
     void obstacles2Tracker(const umap::Obstacles& dync_boxes3D_msg);
 
-    void updateTrackerList(vector<onboardDetector::ObstacleTracker>& trackers, const vector<Eigen::Vector3d>& bbox_sizes, const vector<Eigen::Vector3d>& measurements, double current_time);
-
     struct ObstacleMeasureFeature {
         Eigen::Vector3d centroid_measurement;
         Eigen::Vector3d dimension;
@@ -37,7 +33,6 @@ public:
 private:
     ros::NodeHandle& nh_;
     ros::Subscriber obstacles_sub_;
-    ros::Subscriber features_sub_;
     ros::Publisher marker_pub_;
     ros::Publisher text_marker_pub_;
     ros::Publisher path_pub_;
@@ -46,16 +41,11 @@ private:
     
     rematchParams rematch_params_;
 
-    bool is_initialized_ = false;
-
-    vector<onboardDetector::ObstacleTracker> trackers_;
-    vector<Eigen::Vector3d> curr_centroidMeasurements_; // x, y, z
-    vector<Eigen::Vector3d> curr_sizes_; // width, height, thickness
+    std::vector<onboardDetector::ObstacleTracker> trackers_;
+    std::vector<Eigen::Vector3d> curr_centroidMeasurements_; // x, y, z
+    std::vector<Eigen::Vector3d> curr_sizes_; // width, height, thickness
     umap::Obstacles curr_obstacles_raw_; // raw 3D boxes from message
 
-
-    std::vector<std::vector<float>> clip_features_; // Store clip features
-    std::vector<int> clip_ids_; // Store 3D clip features
 
     std::map<int, int> id_mapping_; // Maps tracker ID(global ID) to measurement ID(current frame ID)
     std::map<int, std::vector<int>> invalid_match_mapping_;
@@ -72,7 +62,7 @@ private:
     void publishTrackerDetails(double current_time);
     void publishStatistics(const umap::RematchStatistics& stats);
 
-    Eigen::MatrixXd getCostMatrix(vector<onboardDetector::ObstacleTracker>& trackers, const vector<ObstacleMeasureFeature>& measurements);
+    Eigen::MatrixXd getCostMatrix(std::vector<onboardDetector::ObstacleTracker>& trackers, const std::vector<ObstacleMeasureFeature>& measurements);
 
     // ── Per-frame profiling timestamps (set inside obstacles2Tracker) ─────────
     using TimePoint = std::chrono::steady_clock::time_point;

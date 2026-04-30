@@ -11,7 +11,7 @@ trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh) {
     boxes2D_sub_ = nh_.subscribe("/umap/2D_bounding_boxes", 10, &trackerNode::boxes2DCallback, this);
 
     // Publishers for visualization
-    marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("", 10);
+    marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("tracker/cubes", 10);
     text_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("tracker/text_markers", 10);
     path_pub_ = nh_.advertise<nav_msgs::Path>("tracker/obstacle_paths", 10);
     obstacles_pub_ = nh_.advertise<umap::Obstacles>("tracker/dynamic_obstacles", 10);

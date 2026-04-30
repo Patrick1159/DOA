@@ -39,40 +39,6 @@ bool trackerNode::isDynamicTracker(onboardDetector::ObstacleTracker& tracker) co
         is_velocity_sustained = (consecutive_count >= MIN_CONSECUTIVE_FRAMES);
     }
 
-    // // 指数平滑速度历史
-    // std::vector<double> smoothed_velocities;
-    // if (!tracker.history_vel.empty()) {
-    //     smoothed_velocities.push_back(tracker.history_vel[0].norm());
-    //     const double ALPHA = 0.2; // 指数移动平均平滑因子
-    //     for (size_t i = 1; i < tracker.history_vel.size(); ++i) {
-    //         double vel_norm = tracker.history_vel[i].norm();
-    //         smoothed_velocities.push_back(ALPHA * vel_norm + (1 - ALPHA) * smoothed_velocities.back());
-    //     }
-    // }
-
-    // // 基于平滑速度的持续性检查
-    // bool is_smoothed_velocity_sustained = false;
-    // if (smoothed_velocities.size() >= MIN_CONSECUTIVE_FRAMES) {
-    //     int consecutive_count = 0;
-    //     for (size_t i = smoothed_velocities.size() - MIN_CONSECUTIVE_FRAMES; i < smoothed_velocities.size(); ++i) {
-    //         if (smoothed_velocities[i] > SPEED_THRESHOLD) {
-    //             consecutive_count++;
-    //         } else {
-    //             consecutive_count = 0;
-    //         }
-    //     }
-    //     is_smoothed_velocity_sustained = (consecutive_count >= MIN_CONSECUTIVE_FRAMES);
-    // }
-
-    // // 3. 计算速度差
-    // for (auto it = tracker.history_vel.begin(); it != tracker.history_vel.end(); ++it) {
-    //     if (it != tracker.history_vel.begin()) {
-    //         auto prev_it = std::prev(it);
-    //         double velocity_diff = (*it - *prev_it).norm();
-    //         // ROS_INFO_STREAM("[Tracker] Velocity difference: " << velocity_diff);
-    //     }
-    // }
-
     // 综合判断动态性
     bool isDynamic = (velocity >= params_.DYNAMIC_VELOCITY_THRESHOLD) &&
                      (velocity <= params_.DYNAMIC_VELOCITY_MAX) &&
@@ -89,21 +55,6 @@ bool trackerNode::isDynamicTracker(onboardDetector::ObstacleTracker& tracker) co
     }
 
 
-    // Determine the final dynamic status based on consecutive frames
-    // // 1. 用STATUS_HISTORY投票确定
-    // int dynamic_count = 0;
-    // for (size_t i = 0; i < tracker.isDynamicHistory.size(); ++i) {
-    //     if (tracker.isDynamicHistory[i]) {
-    //         dynamic_count++;
-    //     }
-    // }
-    // // If the dynamic status is consistent for the required number of frames, finalize it
-    // if (dynamic_count >= params_.MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE) {
-    //     tracker.isDynamic = true;
-    // } else if (tracker.isDynamicHistory.size() >= params_.MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE &&
-    //            dynamic_count == 0) {
-    //     tracker.isDynamic = false;
-    // }
 
     // TODO: 上面下面看下哪个好
     // 1. 根据最后n帧是否连续来判断
@@ -152,8 +103,8 @@ bool trackerNode::isDynamicTracker(onboardDetector::ObstacleTracker& tracker) co
 /// @brief Get Munkres cost matrix between trackers and measurements.
 /// @param trackers
 /// @param measurements
-Eigen::MatrixXd trackerNode::getCost_matrix(vector<onboardDetector::ObstacleTracker>& trackers,
-        const vector<Eigen::Vector3d>& measurements, const vector<Eigen::Vector3d>& bbox_sizes,
+Eigen::MatrixXd trackerNode::getCost_matrix(std::vector<onboardDetector::ObstacleTracker>& trackers,
+        const std::vector<Eigen::Vector3d>& measurements, const std::vector<Eigen::Vector3d>& bbox_sizes,
         const double iou_threshold, const double dist_threshold,
         const double iou_weight, const double dist_weight) {
     int n_trackers = trackers.size();
@@ -423,7 +374,6 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
         onboardDetector::ObstacleTracker new_tracker;
         std::string uuid = umap::generate_uuid();
         new_tracker.init(measurements[idx], bbox_sizes[idx], current_time, nextAvailableTrackerId, uuid);
-        new_tracker.update(measurements[idx], bbox_sizes[idx], current_time, params_.HISTORY_SIZE);
         trackers_.push_back(new_tracker);
         
         // Add new mapping
@@ -447,34 +397,27 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
         nextAvailableTrackerId++;
     }
 
-    // Predict for unmatched dynamic trackers so their KF state is up-to-date
-    // Update dynamic status for every tracker exactly once per frame.
+    // Update dynamic status for every tracker exactly once per frame, and
+    // predict unmatched dynamic trackers for dimension expansion.
     // Visualization reads `tracker.isDynamic` without calling isDynamicTracker()
     // again, to avoid corrupting isDynamicHistory with duplicate samples.
-    for (auto& tracker : trackers_) {
-        (void)isDynamicTracker(tracker);
-    }
-
-    if (!trackers_.empty()) {
-        std::vector<bool> is_tracker_matched(trackers_.size(), false);
-        for (const auto& match : matched_pairs) {
-            if (match.first >= 0 && match.first < static_cast<int>(trackers_.size())) {
-                is_tracker_matched[match.first] = true;
-            }
+    std::vector<bool> is_tracker_matched(trackers_.size(), false);
+    for (const auto& match : matched_pairs) {
+        if (match.first >= 0 && match.first < static_cast<int>(trackers_.size())) {
+            is_tracker_matched[match.first] = true;
         }
-        for (size_t i = 0; i < trackers_.size(); ++i) {
-            if (is_tracker_matched[i]) continue;
-            // Only continue prediction/publishing for dynamic trackers that haven't timed out
-            double time_since_update = current_time - trackers_[i].getLastUpdateTime();
-            if (time_since_update <= params_.UNMATCHED_PUBLISH_TIMEOUT && trackers_[i].isDynamic) {
-                // Use dimension expansion prediction for dynamic trackers
-                trackers_[i].predictOnlyWithDimensionExpansion(current_time, params_.EXPANSION_RATE); // 30% expansion per second
-                trackers_[i].was_dimension_expanded = true; // Mark as dimension expanded
+    }
+    for (size_t i = 0; i < trackers_.size(); ++i) {
+        (void)isDynamicTracker(trackers_[i]);
+        if (is_tracker_matched[i]) continue;
+        double time_since_update = current_time - trackers_[i].getLastUpdateTime();
+        if (time_since_update <= params_.UNMATCHED_PUBLISH_TIMEOUT && trackers_[i].isDynamic) {
+            trackers_[i].predictOnlyWithDimensionExpansion(current_time, params_.EXPANSION_RATE);
+            trackers_[i].was_dimension_expanded = true;
 
-                ROS_DEBUG_NAMED("Coarse tracker", "[Dimension Expansion] Tracker ID %d: time_since_update=%.3fs, dimensions=[%.3f, %.3f, %.3f]",
-                               trackers_[i].track_id, time_since_update,
-                               trackers_[i].box_dimensions.x(), trackers_[i].box_dimensions.y(), trackers_[i].box_dimensions.z());
-            }
+            ROS_DEBUG_NAMED("Coarse tracker", "[Dimension Expansion] Tracker ID %d: time_since_update=%.3fs, dimensions=[%.3f, %.3f, %.3f]",
+                           trackers_[i].track_id, time_since_update,
+                           trackers_[i].box_dimensions.x(), trackers_[i].box_dimensions.y(), trackers_[i].box_dimensions.z());
         }
     }
 

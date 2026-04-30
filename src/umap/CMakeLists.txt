@@ -77,7 +77,6 @@ add_library(${PROJECT_NAME}
     include/umap/umapProcess.cpp
     include/umap/umap_bbox_extraction.cpp
     include/umap/umap_visualization.cpp
-    include/umap/umapVisualisation.cpp
 )
 
 target_link_libraries(${PROJECT_NAME}

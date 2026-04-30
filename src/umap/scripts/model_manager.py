@@ -8,8 +8,17 @@ import time
 from config_manager import ExtractorConfig
 import numpy as np
 
-sys.path.append("/home/user/FastSAM/")
-from fastsam import FastSAM, FastSAMPrompt
+# PyTorch 2.6+ defaults to weights_only=True, which rejects third-party
+# checkpoint classes (e.g. ultralytics.nn.tasks.SegmentationModel).
+# Revert to the pre-2.6 behaviour for trusted local model files.
+_orig_torch_load = torch.load
+def _patched_load(*args, **kwargs):
+    kwargs.setdefault('weights_only', False)
+    return _orig_torch_load(*args, **kwargs)
+torch.load = _patched_load
+
+sys.path.append(ExtractorConfig.FASTSAM_LIB_PATH)
+from fastsam import FastSAM, FastSAMPrompt, FastSAMPredictor
 
 class ModelManager:
     """Manages AI models for feature extraction"""
@@ -38,26 +47,58 @@ class ModelManager:
             raise
     
     def extract_clip_features(self, image, boost=True):
-        """Extract CLIP features from image"""
+        """Extract CLIP features from a single image."""
         try:
             if boost:
                 height, width = image.shape[:2]
                 resize_shape = (width // 2, height // 2)
                 image = cv2.resize(image, resize_shape)
-            
-            # Convert and preprocess
+
             pil_image = PIL.Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
             processed_image = self.clip_preprocess(pil_image).unsqueeze(0).to(self.device)
-            
-            # Extract features
+
             with torch.no_grad():
                 features = self.clip_model.encode_image(processed_image)
                 features /= features.norm(dim=-1, keepdim=True)
-            
+
             return features.cpu().numpy()
-            
+
         except Exception as e:
             rospy.logerr(f"CLIP feature extraction failed: {e}")
+            return None
+
+    def extract_clip_features_batch(self, images, boost=True):
+        """Extract CLIP features from multiple images in one GPU forward pass.
+
+        Args:
+            images: List of BGR numpy arrays (may have different sizes).
+            boost: If True, halve each image dimension before encoding.
+
+        Returns:
+            (N, D) numpy array of L2-normalised features, or None on failure.
+        """
+        if not images:
+            return np.empty((0, 512), dtype=np.float32)
+
+        try:
+            processed = []
+            for image in images:
+                if boost:
+                    h, w = image.shape[:2]
+                    image = cv2.resize(image, (w // 2, h // 2))
+                pil = PIL.Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                processed.append(self.clip_preprocess(pil))
+
+            batch = torch.stack(processed).to(self.device)
+
+            with torch.no_grad():
+                features = self.clip_model.encode_image(batch)
+                features /= features.norm(dim=-1, keepdim=True)
+
+            return features.cpu().numpy()
+
+        except Exception as e:
+            rospy.logerr(f"Batch CLIP feature extraction failed: {e}")
             return None
     
     def run_fastsam(self, image):
@@ -78,103 +119,55 @@ class ModelManager:
             rospy.logerr(f"FastSAM processing failed: {e}")
             return None
     
+    def _get_sam_predictor(self, conf, iou, imgsz):
+        """Return a cached FastSAMPredictor, avoiding the per-call overhead
+        (model warmup, predictor re-creation) that FastSAM.predict() incurs."""
+        key = (conf, iou, imgsz)
+        if not hasattr(self, '_sam_predictor_cache'):
+            self._sam_predictor_cache = {}
+        if key not in self._sam_predictor_cache:
+            overrides = self.fastsam_model.overrides.copy()
+            overrides['conf'] = 0.25
+            overrides.update(conf=conf, iou=iou, imgsz=imgsz,
+                             mode='predict', save=False, verbose=False)
+            pred = FastSAMPredictor(overrides=overrides)
+            pred.setup_model(model=self.fastsam_model.model, verbose=False)
+            self._sam_predictor_cache[key] = pred
+        return self._sam_predictor_cache[key]
+
     def run_fastsam_batch(self, rois, box_ids):
-        """Run FastSAM segmentation on multiple ROIs in TRUE batch mode (GPU parallel)
-        
-        Args:
-            rois: List of ROI images (numpy arrays)
-            box_ids: List of corresponding box IDs
-            
-        Returns:
-            List of (box_id, results) tuples, or None if batch processing not enabled
-        """
+        """Run FastSAM on *all* ROIs in one true GPU batch via a cached predictor."""
         if not self.config.SAM_ENABLE_BATCH or len(rois) <= 1:
-            # Fall back to sequential processing
             return None
-        
+
         try:
+            target_size = self.config.SAM_IMAGE_SIZE
+
+            # Resize to uniform size required for single-tensor stacking
+            resized_rois = [cv2.resize(r, (target_size, target_size)) for r in rois]
+
+            rospy.loginfo(f"Batch FastSAM: {len(rois)} ROIs (imgsz={target_size})")
+            t0 = time.time()
+
+            predictor = self._get_sam_predictor(
+                conf=self.config.SAM_CONFIDENCE,
+                iou=self.config.SAM_IOU,
+                imgsz=target_size)
+
+            raw_results = list(predictor.stream_inference(
+                source=resized_rois, model=self.fastsam_model.model))
+
+            elapsed = time.time() - t0
+            rospy.loginfo(f"Batch FastSAM completed: {len(rois)} ROIs in {elapsed:.3f}s "
+                          f"({elapsed / len(rois):.3f}s per ROI)")
+
             batch_results = []
-            batch_size = self.config.SAM_BATCH_SIZE
-            
-            rospy.loginfo(f"TRUE Batch FastSAM: Processing {len(rois)} ROIs with batch_size={batch_size}")
-            batch_start_time = time.time()
-            
-            # Process ROIs in batches (TRUE PARALLEL PROCESSING)
-            for batch_idx in range(0, len(rois), batch_size):
-                batch_end = min(batch_idx + batch_size, len(rois))
-                batch_rois = rois[batch_idx:batch_end]
-                batch_box_ids = box_ids[batch_idx:batch_end]
-                
-                rospy.loginfo(f"Processing batch {batch_idx // batch_size + 1}: ROIs {batch_idx}-{batch_end}")
-                
-                # **CRITICAL FIX**: Resize all ROIs to same size for batching
-                target_size = self.config.SAM_IMAGE_SIZE
-                resized_rois = []
-                original_shapes = []
-                
-                for roi in batch_rois:
-                    original_shapes.append(roi.shape[:2])
-                    # Resize to target size (FastSAM requirement)
-                    resized_roi = cv2.resize(roi, (target_size, target_size))
-                    resized_rois.append(resized_roi)
-                
-                # **TRUE BATCH PROCESSING**: Stack images and process together
-                batch_start = time.time()
-                try:
-                    # Stack images into batch tensor (B, H, W, C)
-                    stacked_images = np.stack(resized_rois, axis=0)
-                    
-                    # Run FastSAM on the ENTIRE batch at once
-                    # Note: FastSAM processes images one by one internally, but we prepare them efficiently
-                    batch_sam_results = []
-                    for idx, (roi, box_id) in enumerate(zip(resized_rois, batch_box_ids)):
-                        results = self.fastsam_model(
-                            roi,
-                            device=self.device,
-                            retina_masks=True,
-                            conf=self.config.SAM_CONFIDENCE,
-                            iou=self.config.SAM_IOU,
-                            imgsz=target_size
-                        )
-                        batch_sam_results.append((box_id, results))
-                    
-                    batch_time = time.time() - batch_start
-                    rospy.loginfo(f"Batch {batch_idx // batch_size + 1} processed in {batch_time:.3f}s "
-                                 f"({batch_time / len(batch_rois):.3f}s per ROI)")
-                    
-                    batch_results.extend(batch_sam_results)
-                    
-                except Exception as e:
-                    rospy.logerr(f"Batch processing failed: {e}, falling back to sequential")
-                    # Fallback: process individually
-                    for roi, box_id in zip(batch_rois, batch_box_ids):
-                        try:
-                            results = self.fastsam_model(
-                                roi,
-                                device=self.device,
-                                retina_masks=True,
-                                conf=self.config.SAM_CONFIDENCE,
-                                iou=self.config.SAM_IOU,
-                                imgsz=self.config.SAM_IMAGE_SIZE
-                            )
-                            batch_results.append((box_id, results))
-                        except Exception as e2:
-                            rospy.logerr(f"Individual SAM failed for box_id {box_id}: {e2}")
-                            batch_results.append((box_id, None))
-                
-                # Clear GPU cache between batches to avoid OOM
-                if self.device == "cuda":
-                    torch.cuda.empty_cache()
-                    rospy.logdebug(f"Cleared GPU cache after batch")
-            
-            total_batch_time = time.time() - batch_start_time
-            avg_time_per_roi = total_batch_time / len(rois) if rois else 0
-            rospy.loginfo(f"Batch FastSAM completed: {len(rois)} ROIs in {total_batch_time:.3f}s "
-                         f"({avg_time_per_roi:.3f}s per ROI)")
+            for box_id, result in zip(box_ids, raw_results):
+                batch_results.append((box_id, [result]))
             return batch_results
-            
+
         except Exception as e:
-            rospy.logerr(f"Batch FastSAM processing failed: {e}")
+            rospy.logerr(f"Batch SAM inference failed: {e}, falling back to sequential")
             return None
     
     def run_fastsam_box_prompts(self, image_path, box_prompts, visualize_boxes=False):

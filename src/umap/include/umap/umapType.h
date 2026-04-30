@@ -46,14 +46,6 @@ struct box3D
     box3D() : x(0), y(0), z(0), x_width(0), y_width(0), z_width(0) {}
 };
 
-// Dynamic detection structures
-// deprecated
-struct DynamicBbox {
-    cv::Rect rgb_bbox;
-    Eigen::Vector3f centroid;
-    bool is_dynamic;
-};
-
 // Tracking structures
 // deprecated
 struct TrackedCentroid {

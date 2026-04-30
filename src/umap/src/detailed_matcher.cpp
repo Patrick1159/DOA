@@ -10,7 +10,7 @@
 /// @param trackers
 /// @param measurements
 /// @return
-Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTracker> &trackers, const vector<ObstacleMeasureFeature> &measurements)
+Eigen::MatrixXd rematchNode::getCostMatrix(std::vector<onboardDetector::ObstacleTracker> &trackers, const std::vector<ObstacleMeasureFeature> &measurements)
 {
     int n_trackers = trackers.size();
     int m_detections = measurements.size();
@@ -98,7 +98,7 @@ Eigen::MatrixXd rematchNode::getCostMatrix(vector<onboardDetector::ObstacleTrack
     // Print the entire matrix
     std::stringstream ss;
     ss << "\033[1;33m" << "\n[REMATCH] Final Cost Matrix:\n" << cost_matrix << "\033[0m\n";
-    ROS_INFO_STREAM(ss.str());
+    ROS_DEBUG_STREAM(ss.str());
     ROS_INFO("==============================");
     ROS_INFO("=== Match Evaluation End ===");
 
@@ -157,13 +157,13 @@ std::vector<std::pair<int, int>> rematchNode::association(Eigen::MatrixXd &cost_
         }
     }
     // Debug output for result_matrix
-    ROS_INFO("[Detailed tracker] Adjusted Result Matrix after Invalid check:");
+    ROS_DEBUG("[Detailed tracker] Adjusted Result Matrix after Invalid check:");
     for (size_t i = 0; i < result_matrix.rows(); ++i) {
         std::stringstream row_stream;
         for (size_t j = 0; j < result_matrix.cols(); ++j) {
             row_stream << result_matrix(i, j) << " ";
         }
-        ROS_INFO("%s", row_stream.str().c_str());
+        ROS_DEBUG("%s", row_stream.str().c_str());
     }
 
     std::vector<std::pair<int, int>> assignments;

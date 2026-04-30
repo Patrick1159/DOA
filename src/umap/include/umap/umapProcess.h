@@ -53,7 +53,6 @@ public:
     umapProcess();
 
 
-    std::vector<UVbox> UVboxes;
     std::vector<cv::Rect> bounding_box_U; // store 2D bboxes extracted from histogram (width, depth)
     std::vector<cv::Rect> bounding_box_HW; // store 2D bboxes extracted from depth image (height, width)
     std::vector<box3D> boxes3D; // store 3D boxes extracted from depth image (x, y, z, x_width, y_width, z_width) 

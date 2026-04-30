@@ -6,7 +6,8 @@ class ExtractorConfig:
 
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     # Model paths
-    FASTSAM_WEIGHTS_PATH = '/home/user/FastSAM/weights/FastSAM.pt'
+    FASTSAM_LIB_PATH = "/home/patrick/FastSAM/"
+    FASTSAM_WEIGHTS_PATH = '/home/patrick/FastSAM/weights/FastSAM-s.pt'
     CLIP_MODEL_NAME = "ViT-B/32"
     
     # Processing parameters

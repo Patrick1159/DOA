@@ -16,7 +16,7 @@ struct Obstacle {
     Eigen::Vector3d position;
     Eigen::Vector3d velocity;
     Eigen::Vector3d dimensions; // Dimensions of the 3D box (length, width, height)
-    vector<Eigen::Vector3d> history_pos; // Store the history of the obstacle position
+    std::vector<Eigen::Vector3d> history_pos; // Store the history of the obstacle position
     double timestamp;
 };
 
@@ -52,8 +52,8 @@ public:
     bool isDynamic;
     // Store the history of whether the tracker is dynamic
     std::vector<bool> isDynamicHistory;
-    vector<Eigen::Vector3d> history_pos; // store the history of the tracker
-    vector<Eigen::Vector3d> history_vel; // store the history of the tracker
+    std::vector<Eigen::Vector3d> history_pos; // store the history of the tracker
+    std::vector<Eigen::Vector3d> history_vel; // store the history of the tracker
     std::vector<float> obcstacleClipFeatures; // clip feature of obstacle tracker
     Eigen::Vector3d box_dimensions; // Dimensions of the 3D box (width, height, thickness)
     Eigen::Vector3d original_box_dimensions; // Original dimensions when last observed

@@ -15,7 +15,7 @@ rematchNode::rematchNode(ros::NodeHandle &nh) : nh_(nh)
 {
     obstacles_sub_ = nh_.subscribe("/model_output/obstacles", 10, &rematchNode::obstacles2Tracker, this);
     marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualization/tracked_obstacles", 10);
-    text_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualizationtext_markers", 10);
+    text_marker_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("rematch/visualization/text_markers", 10);
     path_pub_ = nh_.advertise<nav_msgs::Path>("rematch/obstacle_paths", 10);
     tracker_details_pub_ = nh_.advertise<umap::TrackerDetailArray>("/rematch/tracker_details", 10);
     statistics_pub_ = nh_.advertise<umap::RematchStatistics>("/rematch_statistics", 10);

@@ -1,4 +1,4 @@
-#!/home/user/miniconda3/envs/oa/bin/python3
+#!/home/patrick/miniconda3/envs/fastsam/bin/python3
 """
 CLIP process node, for parallel processing of images using FastSAM.
 """
@@ -93,13 +93,10 @@ class ParaClipNode:
             rospy.logerr(f"Obstacle processing failed: {e}")
 
     def _extract_features_from_obstacles(self, obstacles_msg):
-        """Extract features from all obstacle ROIs"""
+        """Extract features from all obstacle ROIs (batch CLIP processing)"""
         rospy.loginfo(f"Time from last processing: {time.time() - self.current_time:.3f}s")
         self.current_time = time.time()
-        
-        features = []
-        valid_rois = []
-        masks = []  # Collect masks for debug visualization
+
         processing_stats = {
             'clip_time': 0.0,
             'sam_time': 0.0,
@@ -108,49 +105,56 @@ class ParaClipNode:
             'postprocess_time': 0.0,
             'total_time': 0.0,
         }
-        
+
         rospy.loginfo(f"Processing {len(obstacles_msg.box_ids)} obstacles")
         time_start = time.time()
 
+        # Phase 1: extract masks and ROIs for all obstacles
+        roi_data = []  # (index, box_id, roi)
+        masks = []
         for i, box_id in enumerate(obstacles_msg.box_ids):
             try:
-                # Convert mask and extract ROI  (preprocess)
-                roi_start = time.time()
                 mask = self.bridge.imgmsg_to_cv2(obstacles_msg.mask[i], "passthrough")
-                masks.append(mask)  # Collect mask for visualization
-                
+                masks.append(mask)
+
                 roi = self.image_processor.extract_roi_from_mask(
                     self.current_image, mask, self.config.FOREGROUND_ONLY)
-                processing_stats['preprocess_time'] += time.time() - roi_start
-                
-                # Validate ROI
+
                 if not self.image_processor.is_valid_roi(roi):
                     rospy.logdebug(f"Invalid ROI for box_id {box_id}")
                     continue
-                
-                # Extract CLIP features  (model inference)
-                if self.config.RUN_CLIP:
-                    clip_start_time = time.time()
-                    roi_features = self.model_manager.extract_clip_features(
-                        roi, boost=self.config.BOOST_CLIP)
-                    clip_time = time.time() - clip_start_time
-                else:
-                    roi_features = np.array([1, 1 ,1])  # Dummy feature
-                    clip_time = 0.0
-                
-                if roi_features is not None:
-                    features.append(roi_features)
-                    valid_rois.append(roi)
-                    processing_stats['clip_time'] += clip_time
-                    processing_stats['processed_count'] += 1
-                    
-                    rospy.logdebug(f"Processed box_id {box_id} in {clip_time:.3f}s")
-        
+
+                roi_data.append((i, box_id, roi))
+
             except Exception as e:
-                rospy.logerr(f"Feature extraction failed for box_id {box_id}: {e}")
-                # Add empty mask for failed processing to maintain alignment
+                rospy.logerr(f"ROI extraction failed for box_id {box_id}: {e}")
                 masks.append(np.zeros((1, 1), dtype=np.uint8))
                 continue
+
+        processing_stats['preprocess_time'] = time.time() - time_start
+
+        # Phase 2: batch CLIP inference (single GPU forward pass)
+        features = []
+        valid_rois = []
+        if roi_data and self.config.RUN_CLIP:
+            batch_rois = [d[2] for d in roi_data]
+            clip_start = time.time()
+            batch_features = self.model_manager.extract_clip_features_batch(
+                batch_rois, boost=self.config.BOOST_CLIP)
+            clip_time = time.time() - clip_start
+            processing_stats['clip_time'] = clip_time
+
+            if batch_features is not None:
+                for idx, feat in enumerate(batch_features):
+                    features.append(feat)
+                    valid_rois.append(roi_data[idx][2])
+                    processing_stats['processed_count'] += 1
+        elif roi_data:
+            # RUN_CLIP disabled — return dummy features
+            for _, _, roi in roi_data:
+                features.append(np.array([1.0, 1.0, 1.0]))
+                valid_rois.append(roi)
+                processing_stats['processed_count'] += 1
 
         binary_mask = np.zeros(self.current_image.shape[:2], dtype=np.uint8)
         time_end = time.time()

@@ -13,7 +13,6 @@ struct umapParams {
     float threshold_point = 0.05f;
     float threshold_line = 5.0f;
     int min_length_line = 30;
-    int row_downsample = 1; // default 1
     bool inverse_depth = false;  // 控制是否翻转深度图
     bool enable_horizontal_merge = false;
     int merge_horizontal_gap = 30;

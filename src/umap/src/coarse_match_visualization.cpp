@@ -193,8 +193,6 @@ void trackerNode::publishVisualization() {
             if (!resolveMapping(tracker_idx, tracker_index, tracker_id)) continue;
 
             // 0. Check if tracker is dynamic (state updated in matchAndUpdate)
-            bool is_dynamic = trackers_[tracker_index].isDynamic;
-            if (!is_dynamic) continue; // Skip static obstacles
             if (!trackers_[tracker_index].isDynamic) continue; // Skip obstacles that are not consistently dynamic
 
             auto state = trackers_[tracker_index].getState();
@@ -280,8 +278,6 @@ void trackerNode::publishVisualization() {
             if (!resolveMapping(tracker_idx, tracker_index, tracker_id)) continue;
 
             // 0. Check if tracker is dynamic (state updated in matchAndUpdate)
-            bool is_dynamic = trackers_[tracker_index].isDynamic;
-            if (!is_dynamic) continue; // Skip static obstacles
             if (!trackers_[tracker_index].isDynamic) continue; // Skip obstacles that are not consistently dynamic
 
             auto state = trackers_[tracker_index].getState();
