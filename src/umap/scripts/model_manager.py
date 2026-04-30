@@ -18,7 +18,7 @@ def _patched_load(*args, **kwargs):
 torch.load = _patched_load
 
 sys.path.append(ExtractorConfig.FASTSAM_LIB_PATH)
-from fastsam import FastSAM, FastSAMPrompt, FastSAMPredictor
+from fastsam import FastSAM, FastSAMPrompt
 
 class ModelManager:
     """Manages AI models for feature extraction"""
@@ -119,55 +119,40 @@ class ModelManager:
             rospy.logerr(f"FastSAM processing failed: {e}")
             return None
     
-    def _get_sam_predictor(self, conf, iou, imgsz):
-        """Return a cached FastSAMPredictor, avoiding the per-call overhead
-        (model warmup, predictor re-creation) that FastSAM.predict() incurs."""
-        key = (conf, iou, imgsz)
-        if not hasattr(self, '_sam_predictor_cache'):
-            self._sam_predictor_cache = {}
-        if key not in self._sam_predictor_cache:
-            overrides = self.fastsam_model.overrides.copy()
-            overrides['conf'] = 0.25
-            overrides.update(conf=conf, iou=iou, imgsz=imgsz,
-                             mode='predict', save=False, verbose=False)
-            pred = FastSAMPredictor(overrides=overrides)
-            pred.setup_model(model=self.fastsam_model.model, verbose=False)
-            self._sam_predictor_cache[key] = pred
-        return self._sam_predictor_cache[key]
-
     def run_fastsam_batch(self, rois, box_ids):
-        """Run FastSAM on *all* ROIs in one true GPU batch via a cached predictor."""
+        """Run FastSAM on *all* ROIs in one GPU batch via the standard FastSAM API.
+
+        Passing a list of arrays to fastsam_model() lets its internal dataloader
+        stack them into true batched forward passes (controlled by batch_size)."""
         if not self.config.SAM_ENABLE_BATCH or len(rois) <= 1:
             return None
 
         try:
             target_size = self.config.SAM_IMAGE_SIZE
-
-            # Resize to uniform size required for single-tensor stacking
             resized_rois = [cv2.resize(r, (target_size, target_size)) for r in rois]
 
             rospy.loginfo(f"Batch FastSAM: {len(rois)} ROIs (imgsz={target_size})")
             t0 = time.time()
 
-            predictor = self._get_sam_predictor(
+            results = self.fastsam_model(
+                source=resized_rois,
+                device=self.device,
+                retina_masks=True,
                 conf=self.config.SAM_CONFIDENCE,
                 iou=self.config.SAM_IOU,
                 imgsz=target_size)
-
-            raw_results = predictor(
-                source=resized_rois, model=self.fastsam_model.model)
 
             elapsed = time.time() - t0
             rospy.loginfo(f"Batch FastSAM completed: {len(rois)} ROIs in {elapsed:.3f}s "
                           f"({elapsed / len(rois):.3f}s per ROI)")
 
-            if raw_results is None or len(raw_results) != len(box_ids):
-                rospy.logwarn(f"Batch SAM returned {len(raw_results) if raw_results else 0} results "
+            if results is None or len(results) != len(box_ids):
+                rospy.logwarn(f"Batch SAM returned {len(results) if results else 0} results "
                               f"for {len(box_ids)} inputs, falling back")
                 return None
 
             batch_results = []
-            for box_id, result in zip(box_ids, raw_results):
+            for box_id, result in zip(box_ids, results):
                 batch_results.append((box_id, [result]))
             return batch_results
 
