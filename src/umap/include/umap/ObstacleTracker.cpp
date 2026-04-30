@@ -68,13 +68,14 @@ void ObstacleTracker::updateStateTransitionMatrix() {
     kf.setA(A);
 }
 
-void ObstacleTracker::init(const Eigen::Vector3d& initial_pos, const Eigen::Vector3d& bounding_box_size, double timestamp, 
+void ObstacleTracker::init(const Eigen::Vector3d& initial_pos, const Eigen::Vector3d& bounding_box_size, double timestamp,
         const int newtracker_id, const std::string& uuid) {
     initializeKalmanFilter();
-    
-    Eigen::MatrixXd states = Eigen::MatrixXd::Zero(6, 1);
-    states.block(0, 0, 3, 1) = initial_pos;
-    
+
+    kf.setState(0, initial_pos.x());
+    kf.setState(1, initial_pos.y());
+    kf.setState(2, initial_pos.z());
+
     track_id = newtracker_id; // Set the ID for the new tracker
     track_uuid = uuid; // Set the UUID for the new tracker
 
@@ -94,8 +95,9 @@ void ObstacleTracker::init(const Eigen::Vector3d& initial_pos, const Eigen::Vect
 void ObstacleTracker::initWithFeature(const Eigen::Vector3d& initial_pos, const Eigen::Vector3d& bounding_box_size, const std::vector<float> feature, double timestamp, const int newtracker_id) {
     initializeKalmanFilter();
 
-    Eigen::MatrixXd states = Eigen::MatrixXd::Zero(6, 1);
-    states.block(0, 0, 3, 1) = initial_pos;
+    kf.setState(0, initial_pos.x());
+    kf.setState(1, initial_pos.y());
+    kf.setState(2, initial_pos.z());
 
     track_id = newtracker_id; // Set the ID for the new tracker
 
