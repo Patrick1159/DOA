@@ -154,12 +154,17 @@ class ModelManager:
                 iou=self.config.SAM_IOU,
                 imgsz=target_size)
 
-            raw_results = list(predictor.stream_inference(
-                source=resized_rois, model=self.fastsam_model.model))
+            raw_results = predictor(
+                source=resized_rois, model=self.fastsam_model.model)
 
             elapsed = time.time() - t0
             rospy.loginfo(f"Batch FastSAM completed: {len(rois)} ROIs in {elapsed:.3f}s "
                           f"({elapsed / len(rois):.3f}s per ROI)")
+
+            if raw_results is None or len(raw_results) != len(box_ids):
+                rospy.logwarn(f"Batch SAM returned {len(raw_results) if raw_results else 0} results "
+                              f"for {len(box_ids)} inputs, falling back")
+                return None
 
             batch_results = []
             for box_id, result in zip(box_ids, raw_results):

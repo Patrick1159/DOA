@@ -1,4 +1,4 @@
-#!/home/user/miniconda3/envs/oa/bin/python3
+#!/home/patrick/miniconda3/envs/fastsam/bin/python3
 """
 Subscribes to dynamic obstacles and image topics, processes ROIs, and publishes results.
 """
@@ -194,10 +194,11 @@ class PrarSamNode:
             if batch_results is not None:
                 # Batch processing succeeded
                 for box_id, results in batch_results:
-                    sam_results_dict[box_id] = results
-                    if results is not None and hasattr(results[0], 'masks'):
-                        processing_stats['processed_count'] += 1
-                        rospy.logdebug(f"Batch SAM result for box_id {box_id}: {results[0].masks.data.shape[0]} masks")
+                    if results is not None and len(results) > 0 and results[0] is not None:
+                        sam_results_dict[box_id] = results
+                        if hasattr(results[0], 'masks') and results[0].masks is not None:
+                            processing_stats['processed_count'] += 1
+                            rospy.logdebug(f"Batch SAM result for box_id {box_id}: {results[0].masks.data.shape[0]} masks")
             else:
                 # Fall back to sequential processing
                 rospy.loginfo("Batch processing disabled or failed, using sequential processing")
@@ -281,13 +282,17 @@ class PrarSamNode:
             sam_time = time.time() - sam_start_time
             processing_stats['sam_time'] += sam_time
             rospy.loginfo(f"SAM processing for box_id {box_id}: {sam_time:.3f}s")
-            
+
+            if results is None or results[0] is None or results[0].masks is None:
+                rospy.logwarn(f"SAM returned no results for box_id {box_id}")
+                return torch.empty((0, 0, 0))
+
             # Process SAM results
             masks = results[0].masks.data  # (N, H, W) tensor
             num_masks = masks.shape[0]
             rospy.loginfo(f"SAM found {num_masks} masks for box_id {box_id}")
             return masks
-            
+
         except Exception as e:
             rospy.logerr(f"SAM processing failed for box_id {box_id}: {e}")
             return torch.empty((0, 0, 0))
