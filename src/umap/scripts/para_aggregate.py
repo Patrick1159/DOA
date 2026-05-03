@@ -116,8 +116,12 @@ class ParaMsgAggregator:
             # aggregated_msg.centroid_y = tuple(aggregated_msg.centroid_y)
             # aggregated_msg.centroid_z = tuple(aggregated_msg.centroid_z)
 
-            aggregated_msg.header.frame_id = "odom"
-
+            # NOTE: do NOT overwrite header.frame_id here. Upstream
+            # coarse_match writes data + frame_id consistently (typically
+            # `odom` after the frame-honest refactor). Overwriting it
+            # without transforming centroid_* would produce the
+            # "frame_id-says-odom-but-data-is-in-d435_link" lie that broke
+            # downstream TF logic.
             aggregated_msg.binary_mask = sam_msg.binary_mask
 
             # Copy CLIP features

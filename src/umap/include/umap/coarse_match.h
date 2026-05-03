@@ -11,6 +11,8 @@
 #include <nav_msgs/Path.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <std_msgs/ColorRGBA.h>
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_listener.h>
 #include <array>
 #include <set>
 
@@ -47,6 +49,24 @@ private:
     std::map<int, std::vector<int>> invalid_match_mapping_; // For storing invalid matches (tracker idx -> list of detection idxs)
 
     int nextAvailableTrackerId = 0; // For generating unique tracker IDs
+
+    // TF buffer + listener: used to transform measurements from the source
+    // sensor frame (e.g. d435_color_optical_frame) to COARSE_OUTPUT_FRAME
+    // (typically `odom`) at the message stamp. KF state is stored in
+    // COARSE_OUTPUT_FRAME so that robot motion does NOT appear as obstacle
+    // motion (no fake-dynamic-obstacle artifacts during turns).
+    tf2_ros::Buffer tf_buffer_;
+    tf2_ros::TransformListener tf_listener_;
+
+    /// @brief Transform a 3D point from `source_frame` to COARSE_OUTPUT_FRAME
+    /// at `stamp`. On lookup failure, returns false and logs a throttled WARN
+    /// — caller MUST skip the KF update for that detection (only predict()
+    /// is allowed). Do not silently fall back to a different frame, which
+    /// would pollute KF state semantics.
+    bool transformPointToOutputFrame(const Eigen::Vector3d& in,
+                                     const std::string& source_frame,
+                                     const ros::Time& stamp,
+                                     Eigen::Vector3d& out) const;
 
     std::map<int, std::vector<geometry_msgs::PoseStamped>> tracker_paths_; // Store historical positions for each tracker
     const size_t max_path_length_ = 100; // Maximum number of historical positions to store

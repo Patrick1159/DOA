@@ -65,16 +65,24 @@ void trackerNode::publishVisualization() {
 
             auto state = trackers_[tracker_index].getState();
 
-            // Convert to camera frame coordinates
-            marker.pose.position.x = state.position.z();
-            marker.pose.position.y = -state.position.x();
-            marker.pose.position.z = -state.position.y();
+            // KF state is in COARSE_OUTPUT_FRAME (kFrameId, typically `odom`).
+            // Direct copy — no axis swap. The transformation from the sensor
+            // optical frame happened once at the boxes3DCallback entry.
+            marker.pose.position.x = state.position.x();
+            marker.pose.position.y = state.position.y();
+            marker.pose.position.z = state.position.z();
 
-            // Set marker size using current measurement size
+            // Set marker size. The dimensions come from the sensor optical
+            // frame (width=x_extent, height=y_extent, thickness=z_extent in
+            // d435_color_optical_frame) and we render an AABB in
+            // COARSE_OUTPUT_FRAME (typically odom: x=fwd, y=left, z=up).
+            // Approximate by mapping optical→odom axes assuming the camera
+            // points roughly along odom-x; full OBB rendering is out of
+            // scope (frame-honest refactor only).
             if (measurement_id < curr_sizes_.size()) {
-                marker.scale.x = curr_sizes_[measurement_id][0]; // thickness
-                marker.scale.y = curr_sizes_[measurement_id][2]; // width
-                marker.scale.z = curr_sizes_[measurement_id][1]; // height
+                marker.scale.x = curr_sizes_[measurement_id][2]; // odom fwd  ← optical z (thickness)
+                marker.scale.y = curr_sizes_[measurement_id][0]; // odom left ← optical x (width)
+                marker.scale.z = curr_sizes_[measurement_id][1]; // odom up   ← optical y (height)
             }
 
             // Add velocity information to marker description
@@ -206,11 +214,11 @@ void trackerNode::publishVisualization() {
             text_marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
             text_marker.action = visualization_msgs::Marker::ADD;
 
-            // position equals cube pose position with height offset
-            text_marker.pose.position.x = state.position.z();
-            text_marker.pose.position.y = -state.position.x();
-            text_marker.pose.position.z = -state.position.y() + 0.5; // Offset for text height
-            text_marker.scale.z = 0.1; // Font size 
+            // position equals cube pose with a small +z offset (odom: z=up)
+            text_marker.pose.position.x = state.position.x();
+            text_marker.pose.position.y = state.position.y();
+            text_marker.pose.position.z = state.position.z() + 0.5; // Offset above cube
+            text_marker.scale.z = 0.1; // Font size
 
             // Calculate average movement
             double avg_movement = 0.0;
@@ -282,14 +290,18 @@ void trackerNode::publishVisualization() {
 
             auto state = trackers_[tracker_index].getState();
 
-            // Construct obstacles_msg using current measurement
+            // Construct obstacles_msg using current measurement.
+            // KF state is already in OUTPUT_FRAME (kOutputFrame, typically
+            // odom). Direct copy. Dimensions stay in their semantic fields
+            // (msg.width = optical x-extent, height = optical y-extent,
+            // thickness = optical z-extent).
             obstacles_msg.box_ids.push_back(tracker_id);
-            obstacles_msg.centroid_x.push_back(state.position.z());
-            obstacles_msg.centroid_y.push_back(-state.position.x());
-            obstacles_msg.centroid_z.push_back(-state.position.y());
-            obstacles_msg.width.push_back(curr_sizes_[measurement_id][2]);
-            obstacles_msg.height.push_back(curr_sizes_[measurement_id][0]);
-            obstacles_msg.thickness.push_back(curr_sizes_[measurement_id][1]);
+            obstacles_msg.centroid_x.push_back(state.position.x());
+            obstacles_msg.centroid_y.push_back(state.position.y());
+            obstacles_msg.centroid_z.push_back(state.position.z());
+            obstacles_msg.width.push_back(curr_sizes_[measurement_id][0]);
+            obstacles_msg.height.push_back(curr_sizes_[measurement_id][1]);
+            obstacles_msg.thickness.push_back(curr_sizes_[measurement_id][2]);
             obstacles_msg.mask.push_back(curr_masks_[measurement_id]); // Add mask to obstacles_msg
             obstacles_msg.box_x.push_back(curr_boxes2D_raw_.x[measurement_id]); // x
             obstacles_msg.box_y.push_back(curr_boxes2D_raw_.y[measurement_id]); // y
@@ -310,9 +322,9 @@ void trackerNode::publishVisualization() {
 
                 pose_stamped.header.frame_id = kFrameId;
                 pose_stamped.header.stamp = current_time;
-                pose_stamped.pose.position.x = pos.z(); // z
-                pose_stamped.pose.position.y = -pos.x(); // x
-                pose_stamped.pose.position.z = -pos.y(); // y
+                pose_stamped.pose.position.x = pos.x();
+                pose_stamped.pose.position.y = pos.y();
+                pose_stamped.pose.position.z = pos.z();
 
                 // default identity orientation
                 pose_stamped.pose.orientation.x = 0.0;
@@ -351,14 +363,14 @@ void trackerNode::publishVisualization() {
             }
 
             obstacles_msg.box_ids.push_back(tracker_id);
-            obstacles_msg.centroid_x.push_back(state.position.z());
-            obstacles_msg.centroid_y.push_back(-state.position.x());
-            obstacles_msg.centroid_z.push_back(-state.position.y());
-            // Maintain the same dimension ordering as matched case
+            obstacles_msg.centroid_x.push_back(state.position.x());
+            obstacles_msg.centroid_y.push_back(state.position.y());
+            obstacles_msg.centroid_z.push_back(state.position.z());
+            // Dimensions stay in their semantic fields (last observed sz from cache).
             const Eigen::Vector3d& sz = size3d_it->second; // [width, height, thickness]
-            obstacles_msg.width.push_back(sz[2]);
-            obstacles_msg.height.push_back(sz[0]);
-            obstacles_msg.thickness.push_back(sz[1]);
+            obstacles_msg.width.push_back(sz[0]);
+            obstacles_msg.height.push_back(sz[1]);
+            obstacles_msg.thickness.push_back(sz[2]);
             obstacles_msg.mask.push_back(mask_it->second);
             const auto& b2d = box2d_it->second;
             obstacles_msg.box_x.push_back(b2d[0]);
@@ -380,9 +392,9 @@ void trackerNode::publishVisualization() {
 
                 pose_stamped.header.frame_id = kFrameId;
                 pose_stamped.header.stamp = current_time;
-                pose_stamped.pose.position.x = pos.z(); // z
-                pose_stamped.pose.position.y = -pos.x(); // x
-                pose_stamped.pose.position.z = -pos.y(); // y
+                pose_stamped.pose.position.x = pos.x();
+                pose_stamped.pose.position.y = pos.y();
+                pose_stamped.pose.position.z = pos.z();
 
                 // default identity orientation
                 pose_stamped.pose.orientation.x = 0.0;
@@ -418,12 +430,12 @@ void trackerNode::publishVisualization() {
             auto state = tracker.getState();
 
             obstacles_msg.box_ids.push_back(tracker_id);
-            obstacles_msg.centroid_x.push_back(state.position.z());
-            obstacles_msg.centroid_y.push_back(-state.position.x());
-            obstacles_msg.centroid_z.push_back(-state.position.y());
-            obstacles_msg.width.push_back(curr_sizes_[measurement_id][2]);
-            obstacles_msg.height.push_back(curr_sizes_[measurement_id][0]);
-            obstacles_msg.thickness.push_back(curr_sizes_[measurement_id][1]);
+            obstacles_msg.centroid_x.push_back(state.position.x());
+            obstacles_msg.centroid_y.push_back(state.position.y());
+            obstacles_msg.centroid_z.push_back(state.position.z());
+            obstacles_msg.width.push_back(curr_sizes_[measurement_id][0]);
+            obstacles_msg.height.push_back(curr_sizes_[measurement_id][1]);
+            obstacles_msg.thickness.push_back(curr_sizes_[measurement_id][2]);
             obstacles_msg.mask.push_back(curr_masks_[measurement_id]);
             obstacles_msg.box_x.push_back(curr_boxes2D_raw_.x[measurement_id]);
             obstacles_msg.box_y.push_back(curr_boxes2D_raw_.y[measurement_id]);

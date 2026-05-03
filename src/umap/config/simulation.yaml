@@ -42,8 +42,12 @@ tracker_node:
   STATUS_HISTORY_SIZE: 10
   MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3
 
-  # Visualization frame id
+  # Visualization frame id (also the frame KF state lives in after Phase 7
+  # frame-honest refactor — robot motion does not appear as obstacle motion).
   COARSE_VIS_FRAME: "odom"
+  # Output frame id (frame_id stamped on obstacles_msg consumed downstream).
+  # Must equal the frame KF state lives in.
+  COARSE_OUTPUT_FRAME: "odom"
 
 rematch_node:
   SIMILARITY_THRESHOLD: 0.71
@@ -56,3 +60,6 @@ rematch_node:
   VELOCITY_DIFF_WEIGHT: 0.5
   MAX_TRACKER_AGE : 0.0 # seconds, max age of a tracker without updates
   REMATCH_VIS_FRAME: "odom"
+  # Output frame id (frame_id stamped on tracker_details consumed downstream).
+  # Must equal the frame KF state lives in.
+  REMATCH_OUTPUT_FRAME: "odom"
