@@ -4,6 +4,7 @@
 #include <umap/coarse_match.h>
 #include <geometry_msgs/PointStamped.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <limits>
 
 /// @brief Constructor for the trackerNode class.
 /// @param nh
@@ -37,6 +38,7 @@ trackerNode::trackerNode(ros::NodeHandle& nh) : nh_(nh), tf_listener_(tf_buffer_
     nh_.param("tracker_node/UNMATCHED_PUBLISH_TIMEOUT", params_.UNMATCHED_PUBLISH_TIMEOUT, 0.5); // seconds, independent of MAX_TRACKER_AGE
     nh_.param("tracker_node/EXPANSION_RATE", params_.EXPANSION_RATE, 0.3); // per second dimension expansion rate for dynamic trackers
     nh_.param("tracker_node/CANDIDATE_VELOCITY_THRESHOLD", params_.CANDIDATE_VELOCITY_THRESHOLD, 0.2); // candidate early-publish |v| threshold
+    nh_.param("tracker_node/MIN_OBSTACLE_Z", params_.MIN_OBSTACLE_Z, 0.1); // ground filter: drop detections with output-frame z below this
 
     // Visualization param
     nh_.param("tracker_node/COARSE_VIS_FRAME", params_.COARSE_VIS_FRAME, std::string("camera_color_optical_frame"));
@@ -62,40 +64,54 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     const std::string source_frame = boxes3D_msg.header.frame_id;
     const ros::Time stamp = boxes3D_msg.header.stamp;
 
-    // 0. Extract 3D bounding boxes from the message and transform each
-    //    centroid from the sensor optical frame to COARSE_OUTPUT_FRAME
-    //    (typically `odom`). KF state is stored in OUTPUT_FRAME.
-    //    Sizes (width/height/thickness) are scalar dimensions, not points,
-    //    so they are not transformed — only the orientation of the AABB
-    //    in the output frame is implicit (we keep the same axis-aligned
-    //    convention; a tighter implementation could convert to OBBs but
-    //    that is out of scope for this refactor).
+    // 0. Extract 3D bounding boxes from the message and reproject each
+    //    AABB (centroid + extents) from the sensor optical frame to
+    //    COARSE_OUTPUT_FRAME (typically `odom`). KF state is stored in
+    //    OUTPUT_FRAME. The reprojection takes the 8 corners of the source
+    //    AABB and re-AABBs them in the output frame, so dimensions become
+    //    semantically meaningful in the output frame (width = output-x
+    //    extent, etc.) — eliminates rotation-dependent dimension confusion
+    //    when the robot turns. Still an AABB (not a true OBB).
+    //    Detections whose output-frame z falls below MIN_OBSTACLE_Z are
+    //    dropped as ground noise.
     std::vector<Eigen::Vector3d> measurements;
     std::vector<Eigen::Vector3d> sizes;
     std::vector<sensor_msgs::Image> masks;
     std::vector<size_t> kept_indices;  // original boxes3D_msg index per kept measurement
 
     for (size_t i = 0; i < boxes3D_msg.box_ids.size(); i++) {
-        Eigen::Vector3d measurement_src, measurement_out, size;
-        measurement_src << boxes3D_msg.x[i], boxes3D_msg.y[i], boxes3D_msg.z[i];
+        Eigen::Vector3d centroid_src, extents_src, centroid_out, extents_out;
+        centroid_src << boxes3D_msg.x[i], boxes3D_msg.y[i], boxes3D_msg.z[i];
+        extents_src  << boxes3D_msg.width[i], boxes3D_msg.height[i], boxes3D_msg.thickness[i];
 
-        if (!transformPointToOutputFrame(measurement_src, source_frame, stamp, measurement_out)) {
+        if (!reprojectAabbToOutputFrame(centroid_src, extents_src, source_frame, stamp,
+                                         centroid_out, extents_out)) {
             // TF lookup failed — skip this detection entirely. KF will only
             // predict() for matched trackers in this frame, preserving
-            // odom-frame state semantics. Already warned inside the helper.
+            // output-frame state semantics. Already warned inside the helper.
             continue;
         }
 
-        size << boxes3D_msg.width[i], boxes3D_msg.height[i], boxes3D_msg.thickness[i];
-        measurements.push_back(measurement_out);
-        sizes.push_back(size);
+        // Ground filter: drop detections sitting on/below the floor.
+        // Output frame z=0 is assumed to be the ground plane (true for
+        // `odom` in the standard ROS convention).
+        if (centroid_out.z() < params_.MIN_OBSTACLE_Z) {
+            ROS_DEBUG_NAMED("Coarse tracker",
+                "[Coarse tracker] Box %zu skipped: out-frame z=%.3f < MIN_OBSTACLE_Z=%.3f",
+                i, centroid_out.z(), params_.MIN_OBSTACLE_Z);
+            continue;
+        }
+
+        measurements.push_back(centroid_out);
+        sizes.push_back(extents_out);
         masks.push_back(boxes3D_msg.mask[i]);
         kept_indices.push_back(i);
 
         ROS_INFO_STREAM("[Coarse tracker] Box " << i
-                        << " src(" << source_frame << "): [" << measurement_src.transpose()
-                        << "] → out(" << params_.COARSE_OUTPUT_FRAME << "): ["
-                        << measurement_out.transpose() << "], size: [" << size.transpose() << "]");
+                        << " src(" << source_frame << "): centroid [" << centroid_src.transpose()
+                        << "] extents [" << extents_src.transpose() << "]"
+                        << " → out(" << params_.COARSE_OUTPUT_FRAME << "): centroid ["
+                        << centroid_out.transpose() << "] extents [" << extents_out.transpose() << "]");
     }
 
     // Rebuild curr_boxes2D_raw_ alignment: downstream visualization indexes
@@ -136,35 +152,69 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     ROS_DEBUG_NAMED("Coarse tracker", "=================Frame end================");
 }
 
-/// @brief Transform a point from `source_frame` to COARSE_OUTPUT_FRAME at
-/// `stamp`. Returns false on lookup failure (with a throttled WARN); caller
-/// MUST skip the affected measurement in that case (do not write a fallback
-/// value into KF state — that would mix frames).
-bool trackerNode::transformPointToOutputFrame(const Eigen::Vector3d& in,
+/// @brief Reproject a source-frame AABB to OUTPUT_FRAME by transforming all
+/// 8 corners and re-AABBing them. Dimensions in the output frame become
+/// semantically meaningful in that frame. Returns false on TF lookup
+/// failure (with a throttled WARN); caller MUST skip the affected detection
+/// in that case (do not write a fallback value into KF state — that would
+/// mix frames).
+bool trackerNode::reprojectAabbToOutputFrame(const Eigen::Vector3d& centroid_src,
+                                              const Eigen::Vector3d& extents_src,
                                               const std::string& source_frame,
                                               const ros::Time& stamp,
-                                              Eigen::Vector3d& out) const {
+                                              Eigen::Vector3d& centroid_out,
+                                              Eigen::Vector3d& extents_out) const {
     const std::string& target = params_.COARSE_OUTPUT_FRAME;
+
+    // Fast path: same frame, no transform needed.
     if (source_frame.empty() || source_frame == target) {
-        out = in;
+        centroid_out = centroid_src;
+        extents_out = extents_src;
         return true;
     }
-    geometry_msgs::PointStamped p_in, p_out;
-    p_in.header.stamp = stamp;
-    p_in.header.frame_id = source_frame;
-    p_in.point.x = in.x();
-    p_in.point.y = in.y();
-    p_in.point.z = in.z();
+
+    // Look up the transform once for all 8 corners; re-using a single
+    // transform avoids 8 TF lookups and ensures all corners share the same
+    // rotation/translation snapshot.
+    geometry_msgs::TransformStamped tf_src_to_out;
     try {
-        // Wait briefly for the transform — covers stamp-vs-now skew.
-        tf_buffer_.transform(p_in, p_out, target, ros::Duration(0.05));
+        tf_src_to_out = tf_buffer_.lookupTransform(target, source_frame, stamp,
+                                                    ros::Duration(0.05));
     } catch (const tf2::TransformException& ex) {
         ROS_WARN_THROTTLE(2.0,
-            "[Coarse tracker] TF lookup %s ← %s @ %.3f failed: %s — skipping measurement",
+            "[Coarse tracker] AABB reproject TF %s ← %s @ %.3f failed: %s — skipping",
             target.c_str(), source_frame.c_str(), stamp.toSec(), ex.what());
         return false;
     }
-    out << p_out.point.x, p_out.point.y, p_out.point.z;
+
+    const Eigen::Vector3d half = extents_src * 0.5;
+    Eigen::Vector3d out_min(std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::infinity());
+    Eigen::Vector3d out_max = -out_min;
+
+    for (int sx : {-1, 1}) {
+        for (int sy : {-1, 1}) {
+            for (int sz : {-1, 1}) {
+                geometry_msgs::PointStamped corner_in, corner_out;
+                corner_in.header.stamp = stamp;
+                corner_in.header.frame_id = source_frame;
+                corner_in.point.x = centroid_src.x() + sx * half.x();
+                corner_in.point.y = centroid_src.y() + sy * half.y();
+                corner_in.point.z = centroid_src.z() + sz * half.z();
+                tf2::doTransform(corner_in, corner_out, tf_src_to_out);
+                out_min.x() = std::min(out_min.x(), corner_out.point.x);
+                out_min.y() = std::min(out_min.y(), corner_out.point.y);
+                out_min.z() = std::min(out_min.z(), corner_out.point.z);
+                out_max.x() = std::max(out_max.x(), corner_out.point.x);
+                out_max.y() = std::max(out_max.y(), corner_out.point.y);
+                out_max.z() = std::max(out_max.z(), corner_out.point.z);
+            }
+        }
+    }
+
+    centroid_out = 0.5 * (out_min + out_max);
+    extents_out  = out_max - out_min;
     return true;
 }
 

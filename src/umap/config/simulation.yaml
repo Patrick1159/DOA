@@ -42,6 +42,11 @@ tracker_node:
   STATUS_HISTORY_SIZE: 10
   MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 3
 
+  # Ground filter: reject detections whose centroid in the output frame
+  # has z below this value. Output frame is `odom` (z=0 is ground), so
+  # 0.1 means "must be at least 10 cm above floor to count as obstacle".
+  MIN_OBSTACLE_Z: 0.1
+
   # Visualization frame id (also the frame KF state lives in after Phase 7
   # frame-honest refactor — robot motion does not appear as obstacle motion).
   COARSE_VIS_FRAME: "odom"

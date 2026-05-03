@@ -54,6 +54,14 @@ struct trackerParams{
 
     std::string COARSE_VIS_FRAME = "camera_color_optical_frame"; // visualization frame for RViz markers
     std::string COARSE_OUTPUT_FRAME = ""; // frame_id stamped on obstacles_msg downstream; empty -> fallback to COARSE_VIS_FRAME
+
+    // Ground filter: detections whose centroid in COARSE_OUTPUT_FRAME has
+    // z below this value are dropped. Targets the camera's view of the
+    // floor being misclassified as a low dynamic obstacle. Assumes the
+    // output frame's z-axis is up and z=0 lies on the ground (true for
+    // `odom` in the standard ROS convention).
+    double MIN_OBSTACLE_Z = 0.1; // meters
+
     double AVERAGE_DEPLACEMENT_THRESHOLD; // m threshold for average displacement of a tracker
     int HISTORY_SIZE; // 每个tracker的历史vel和pos留存长度
     int STATUS_HISTORY_SIZE; // 每个tracker的历史STATUS留存长度
