@@ -107,17 +107,23 @@ visualization_msgs::Marker rematchNode::createObstacleMarker(
     marker.type = visualization_msgs::Marker::LINE_LIST;
     marker.action = visualization_msgs::Marker::ADD;
     
-    // Set position from tracker state
+    // Set position from tracker state — convert from the coord system stored
+    // in the tracker (where x=fwd, y=left, z=up) back to camera optical frame
+    // (x=right, y=down, z=forward). This undoes the swap that coarse_match
+    // applied when building the Obstacles message.
     auto state = trackers_[tracker_idx].getState();
-    marker.pose.position.x = state.position.x();
-    marker.pose.position.y = state.position.y();
-    marker.pose.position.z = state.position.z();
-    
+    marker.pose.position.x = -state.position.y();   // optical right = -stored left
+    marker.pose.position.y = -state.position.z();   // optical down  = -stored up
+    marker.pose.position.z = state.position.x();    // optical fwd   =  stored fwd
+
     // Add bounding box if measurement data is available
     if (measurement_id < static_cast<int>(curr_sizes_.size())) {
-        float width = curr_sizes_[measurement_id][0];
-        float height = curr_sizes_[measurement_id][1];
-        float depth = curr_sizes_[measurement_id][2];
+        // curr_sizes_ stores (thickness, width, height) due to permutation in
+        // the Obstacles message. Remap to (width, height, depth) for the
+        // createBoundingBoxCorners helper.
+        float width  = curr_sizes_[measurement_id][1];  // original width
+        float height = curr_sizes_[measurement_id][2];  // original height
+        float depth  = curr_sizes_[measurement_id][0];  // original thickness
         
         auto corners = createBoundingBoxCorners(width, height, depth);
         addBoundingBoxEdges(marker, corners);
@@ -148,10 +154,10 @@ visualization_msgs::Marker rematchNode::createTextMarker(
     text_marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
     text_marker.action = visualization_msgs::Marker::ADD;
     
-    // Position above the obstacle
+    // Position above the obstacle — in camera optical frame, "up" is -y
     text_marker.pose.position.x = position.x;
-    text_marker.pose.position.y = position.y;
-    text_marker.pose.position.z = position.z + TEXT_HEIGHT_OFFSET;
+    text_marker.pose.position.y = position.y - TEXT_HEIGHT_OFFSET;
+    text_marker.pose.position.z = position.z;
     text_marker.scale.z = TEXT_SCALE;
     
     // Build text content
