@@ -58,29 +58,15 @@ private:
     tf2_ros::Buffer tf_buffer_;
     tf2_ros::TransformListener tf_listener_;
 
-    /// @brief Reproject a source-frame AABB (centroid + axis-aligned extents
-    /// along the source-frame axes) into COARSE_OUTPUT_FRAME, returning a
-    /// new AABB in that frame. The 8 corners of the source AABB are each
-    /// transformed; the output AABB is the bounding box of those 8 points.
-    ///
-    /// Rationale: the upstream box is axis-aligned in the camera optical
-    /// frame, but downstream KF / IoU / visualization works in
-    /// COARSE_OUTPUT_FRAME (typically `odom`). When the robot turns, the
-    /// optical-frame width/height map onto different odom axes. Re-AABBing
-    /// in the output frame keeps the dimensions semantically meaningful in
-    /// that frame (width = odom-x extent, etc.). This is still an AABB —
-    /// not a true OBB — but eliminates the rotation-dependent dimension
-    /// confusion for free.
-    ///
-    /// On TF lookup failure: returns false and logs a throttled WARN. Caller
-    /// MUST skip the affected detection (do not write a fallback value into
-    /// KF state — that would mix frames).
-    bool reprojectAabbToOutputFrame(const Eigen::Vector3d& centroid_src,
-                                    const Eigen::Vector3d& extents_src,
-                                    const std::string& source_frame,
-                                    const ros::Time& stamp,
-                                    Eigen::Vector3d& centroid_out,
-                                    Eigen::Vector3d& extents_out) const;
+    /// @brief Transform a 3D point from `source_frame` to COARSE_OUTPUT_FRAME
+    /// at `stamp`. On lookup failure, returns false and logs a throttled WARN
+    /// — caller MUST skip the KF update for that detection (only predict()
+    /// is allowed). Do not silently fall back to a different frame, which
+    /// would pollute KF state semantics.
+    bool transformPointToOutputFrame(const Eigen::Vector3d& in,
+                                     const std::string& source_frame,
+                                     const ros::Time& stamp,
+                                     Eigen::Vector3d& out) const;
 
     std::map<int, std::vector<geometry_msgs::PoseStamped>> tracker_paths_; // Store historical positions for each tracker
     const size_t max_path_length_ = 100; // Maximum number of historical positions to store

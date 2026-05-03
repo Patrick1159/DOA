@@ -345,23 +345,38 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
         if (y_up < y_down) {
             // 1. 生成3D box
             box3D curr_box;
-            float mid_depth = (depth_in_near + depth_in_far) / 2.0;
 
-            mid_depth /= params_.depth_factor; // convert mm to meter
-            depth_in_far /= params_.depth_factor;
+            depth_in_far /= params_.depth_factor; // convert mm to meter
             depth_in_near /= params_.depth_factor;
 
-            // 3D box centeroid
-            // (x, y, z)为camera坐标系(右手)下的位置，单位：m
-            // x: 水平← 宽，y: 竖直↑ 高，z: 深
-            curr_box.x = (bb_U.x + bb_U.width / 2.0 - params_.px) * mid_depth / params_.fx;
-            curr_box.y = ((y_up + y_down) / 2.0 - params_.py) * mid_depth / params_.fy;
-            curr_box.z = mid_depth;
+            // The pixel UV box (bb_U.x..x+width on u-axis, y_up..y_down on
+            // v-axis) is the projection of the obstacle's FRONT face — the
+            // back face is occluded and not visible in the depth image.
+            // Reproject UV using `depth_in_near` (front-face depth) to get
+            // the 3D location of the front-face center, then translate
+            // along the camera optical z-axis by half the obstacle's
+            // estimated thickness to obtain the geometric centroid.
+            //
+            // Using mid_depth for the UV reprojection (as before) was a
+            // bug: it scaled (x, y) outward by mid_depth/depth_in_near and
+            // also placed the centroid at the front face along z, since
+            // mid_depth was numerically close to depth_in_near (the U-map
+            // blob extent is the only thickness signal we have, and most
+            // of it lies just past the visible front face).
+            const float u_center = bb_U.x + bb_U.width / 2.0f;
+            const float v_center = (y_up + y_down) / 2.0f;
+            const float thickness = depth_in_far - depth_in_near;
 
-            // Calculate box dimensions in meters
-            curr_box.x_width = std::max(0.1f, bb_U.width * mid_depth / params_.fx); //宽度，保证尺寸不小于0.1*0.1*0.1
-            curr_box.y_width = std::max(0.1f, (y_down - y_up) * mid_depth / params_.fy); //高度
-            curr_box.z_width = std::max(0.1f, depth_in_far - depth_in_near); //厚度
+            curr_box.x = (u_center - params_.px) * depth_in_near / params_.fx;
+            curr_box.y = (v_center - params_.py) * depth_in_near / params_.fy;
+            curr_box.z = depth_in_near + thickness / 2.0f;
+
+            // Calculate box dimensions in meters. Width/height are scaled
+            // at the front face depth (consistent with the UV reprojection
+            // above); thickness is the depth-direction extent.
+            curr_box.x_width = std::max(0.1f, bb_U.width * depth_in_near / params_.fx); // 宽度
+            curr_box.y_width = std::max(0.1f, (y_down - y_up) * depth_in_near / params_.fy); // 高度
+            curr_box.z_width = std::max(0.1f, thickness); // 厚度
             boxes3D.push_back(curr_box);
 
             // 2.Create mask data
