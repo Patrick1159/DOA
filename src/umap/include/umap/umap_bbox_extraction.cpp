@@ -354,29 +354,48 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
             // back face is occluded and not visible in the depth image.
             // Reproject UV using `depth_in_near` (front-face depth) to get
             // the 3D location of the front-face center, then translate
-            // along the camera optical z-axis by half the obstacle's
-            // estimated thickness to obtain the geometric centroid.
+            // half a thickness ALONG THE VIEW RAY (not along the optical
+            // z-axis) to obtain the geometric centroid.
             //
-            // Using mid_depth for the UV reprojection (as before) was a
-            // bug: it scaled (x, y) outward by mid_depth/depth_in_near and
-            // also placed the centroid at the front face along z, since
-            // mid_depth was numerically close to depth_in_near (the U-map
-            // blob extent is the only thickness signal we have, and most
-            // of it lies just past the visible front face).
+            // Why along the view ray: U-map bins are slices of the optical
+            // z-axis, so depth_in_far - depth_in_near is the obstacle's
+            // extent measured along the optical z-axis. To physically
+            // represent the obstacle's centroid we must move along the
+            // line of sight from the camera origin through the front-face
+            // center — that is the direction in which the back face is
+            // hidden behind the front face. For on-axis pixels the view
+            // ray equals +z and the two are equivalent; for off-axis
+            // pixels they diverge and using +z places the centroid in the
+            // wrong direction.
+            //
+            // We also rescale the depth-axis thickness into a view-ray
+            // thickness via the secant of the off-axis angle:
+            //   thickness_view = thickness_z * |front_pt| / depth_in_near
+            // so the box thickness in 3D matches what would be measured
+            // along the same direction along which we just translated.
             const float u_center = bb_U.x + bb_U.width / 2.0f;
             const float v_center = (y_up + y_down) / 2.0f;
-            const float thickness = depth_in_far - depth_in_near;
 
-            curr_box.x = (u_center - params_.px) * depth_in_near / params_.fx;
-            curr_box.y = (v_center - params_.py) * depth_in_near / params_.fy;
-            curr_box.z = depth_in_near + thickness / 2.0f;
+            const float x_front = (u_center - params_.px) * depth_in_near / params_.fx;
+            const float y_front = (v_center - params_.py) * depth_in_near / params_.fy;
+            const float front_norm = std::sqrt(x_front * x_front +
+                                               y_front * y_front +
+                                               depth_in_near * depth_in_near);
 
-            // Calculate box dimensions in meters. Width/height are scaled
-            // at the front face depth (consistent with the UV reprojection
-            // above); thickness is the depth-direction extent.
+            const float thickness_z = depth_in_far - depth_in_near;
+            const float thickness_view = thickness_z * front_norm / depth_in_near;
+            const float scale = (front_norm + thickness_view / 2.0f) / front_norm;
+
+            curr_box.x = x_front * scale;
+            curr_box.y = y_front * scale;
+            curr_box.z = depth_in_near * scale;
+
+            // Box dimensions: width/height are reprojected at the front
+            // face depth (consistent with the UV reprojection above);
+            // thickness is the view-ray-aligned extent.
             curr_box.x_width = std::max(0.1f, bb_U.width * depth_in_near / params_.fx); // 宽度
             curr_box.y_width = std::max(0.1f, (y_down - y_up) * depth_in_near / params_.fy); // 高度
-            curr_box.z_width = std::max(0.1f, thickness); // 厚度
+            curr_box.z_width = std::max(0.1f, thickness_view); // 厚度（沿视线）
             boxes3D.push_back(curr_box);
 
             // 2.Create mask data
