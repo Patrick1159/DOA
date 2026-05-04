@@ -278,37 +278,40 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
     for (const auto &mapping : id_mapping_)
         ROS_DEBUG_NAMED("rematch", "  Tracker ID %d -> Measurement ID %d", mapping.first, mapping.second);
 
-    // 5. 打印dynamic tracker数据(history pos, vel)
-    ROS_INFO("========== Dynamic Trackers Analysis ==========");
-    ROS_INFO("Total active trackers: %zu", trackers_.size());
-    
+    // 5. 打印dynamic tracker数据(history pos, vel) — DEBUG only.
+    // The "future positions" computed via getNextKFrameState are NOT consumed
+    // downstream (TrackerDetail.msg has no future_positions field, MPC does
+    // its own constant-velocity extrapolation). Keep the print as a debug
+    // aid but stop spamming INFO every frame.
+    ROS_DEBUG_NAMED("rematch", "========== Dynamic Trackers Analysis ==========");
+    ROS_DEBUG_NAMED("rematch", "Total active trackers: %zu", trackers_.size());
+
     for (size_t i = 0; i < trackers_.size(); ++i) {
         const auto& tracker = trackers_[i];
         auto state = tracker.getState();
-        
-        ROS_INFO("--- Tracker ID: %d ---", tracker.track_id);
-        ROS_INFO("  Current Position: [%.3f, %.3f, %.3f]", 
+
+        ROS_DEBUG_NAMED("rematch", "--- Tracker ID: %d ---", tracker.track_id);
+        ROS_DEBUG_NAMED("rematch", "  Current Position: [%.3f, %.3f, %.3f]",
                  state.position.x(), state.position.y(), state.position.z());
-        ROS_INFO("  Current Velocity: [%.3f, %.3f, %.3f] (magnitude: %.3f m/s)", 
+        ROS_DEBUG_NAMED("rematch", "  Current Velocity: [%.3f, %.3f, %.3f] (magnitude: %.3f m/s)",
                  state.velocity.x(), state.velocity.y(), state.velocity.z(),
                  state.velocity.norm());
-        ROS_INFO("  Box Dimensions: [%.3f, %.3f, %.3f]", 
+        ROS_DEBUG_NAMED("rematch", "  Box Dimensions: [%.3f, %.3f, %.3f]",
                  tracker.box_dimensions.x(), tracker.box_dimensions.y(), tracker.box_dimensions.z());
-        ROS_INFO("  Last Update Time: %.3f", tracker.getLastUpdateTime());
-        ROS_INFO("  Age: %.3f seconds", current_time - tracker.getLastUpdateTime());
-        
-        // Print position history if available
-        // Note: You might need to add a method to ObstacleTracker to access position history
-        // For now, we'll show predicted future positions based on current velocity
+        ROS_DEBUG_NAMED("rematch", "  Last Update Time: %.3f", tracker.getLastUpdateTime());
+        ROS_DEBUG_NAMED("rematch", "  Age: %.3f seconds", current_time - tracker.getLastUpdateTime());
+
+        // Print predicted future positions (constant-velocity, KF state-based).
+        // Currently only used for debug visibility; not exported to downstream.
         auto future_positions = getNextKFrameState(tracker, 5);
-        ROS_INFO("  Predicted next 5 positions:");
+        ROS_DEBUG_NAMED("rematch", "  Predicted next 5 positions:");
         for (size_t k = 0; k < future_positions.size(); ++k) {
-            ROS_INFO("    Frame +%zu: [%.3f, %.3f, %.3f]", k+1, 
+            ROS_DEBUG_NAMED("rematch", "    Frame +%zu: [%.3f, %.3f, %.3f]", k+1,
                      future_positions[k].x(), future_positions[k].y(), future_positions[k].z());
         }
-        ROS_INFO("  --------------------------------");
+        ROS_DEBUG_NAMED("rematch", "  --------------------------------");
     }
-    ROS_INFO("===============================================");
+    ROS_DEBUG_NAMED("rematch", "===============================================");
 
     // 6. Predict for unmatched dynamic trackers so their KF state is up-to-date
     if (!trackers_.empty()) {
