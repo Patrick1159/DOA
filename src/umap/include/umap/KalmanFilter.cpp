@@ -74,4 +74,12 @@ namespace onboardDetector{
         }
     }
 
+    double kalman_filter::covariance(int i, int j) const
+    {
+        if (!this->is_initialized) return 0.0;
+        if (i < 0 || j < 0) return 0.0;
+        if (i >= this->P.rows() || j >= this->P.cols()) return 0.0;
+        return this->P(i, j);
+    }
+
 }

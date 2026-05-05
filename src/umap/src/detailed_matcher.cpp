@@ -392,9 +392,17 @@ void rematchNode::publishTrackerDetails(double current_time) {
         detail.age = current_time - tracker.getLastUpdateTime();
         detail.confidence = tracker.last_confidence;
 
+        // KF covariance diagonal — used by MPC to inflate the swept-capsule
+        // radius along the prediction horizon. Cross terms ~= 0 in the CV
+        // KF used here (see TrackerDetail.msg for justification).
+        detail.sigma2_xx    = static_cast<float>(tracker.getCovariance(0, 0));
+        detail.sigma2_yy    = static_cast<float>(tracker.getCovariance(1, 1));
+        detail.sigma2_vxvx  = static_cast<float>(tracker.getCovariance(3, 3));
+        detail.sigma2_vyvy  = static_cast<float>(tracker.getCovariance(4, 4));
+
         tracker_details_msg.trackers.push_back(detail);
     }
-    ROS_INFO("Publishing tracker details with %zu entries", tracker_details_msg.trackers.size());
+    ROS_DEBUG_NAMED("rematch", "Publishing tracker details with %zu entries", tracker_details_msg.trackers.size());
     tracker_details_pub_.publish(tracker_details_msg);
 }
 

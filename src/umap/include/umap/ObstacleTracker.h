@@ -45,6 +45,14 @@ public:
     bool isInitialized() const { return initialized; }
     double getLastUpdateTime() const { return lastUpdateTime; }
 
+    // KF state-covariance diagonal elements at the *current* (post-update)
+    // step. State indices: 0=x, 1=y, 2=z, 3=vx, 4=vy, 5=vz. Returns 0.0 when
+    // the tracker is not yet initialized. Downstream consumers (MPC) use
+    // these to grow obstacle uncertainty along the prediction horizon via
+    //   sigma(k) = sqrt(sigma_pos^2 + (k*dt)^2 * sigma_vel^2)
+    // — a closed-form approximation of the constant-velocity KF P-propagate.
+    double getCovariance(int i, int j) const { return kf.covariance(i, j); }
+
     // Tracker properties
     int track_id;
     std::string track_uuid;

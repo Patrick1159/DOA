@@ -52,6 +52,12 @@ namespace onboardDetector{
 
         // set a single state component (used for velocity warm-start seeding)
         void setState(int state_index, double value);
+
+        // Read a single covariance element P(i, j). Used by downstream
+        // consumers (e.g. MPC) to size obstacle uncertainty inflation.
+        // Returns 0.0 when uninitialized or out of bounds (caller treats
+        // that as "no covariance info available").
+        double covariance(int i, int j) const;
     };
 }
 
