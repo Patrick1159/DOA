@@ -215,7 +215,9 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
         for (size_t i = 0; i < curr_obstacles.size(); i++) {
             onboardDetector::ObstacleTracker new_tracker;
             new_tracker.initWithFeature(curr_obstacles[i].centroid_measurement, curr_obstacles[i].dimension, curr_obstacles[i].feature, current_time, global_tracker_id_);
-            new_tracker.updateWithFeature(curr_obstacles[i].centroid_measurement, curr_obstacles[i].dimension, curr_obstacles[i].feature, current_time);
+            // Do not immediately update with the same measurement/timestamp:
+            // velocity warm-start needs two distinct observations.
+            new_tracker.last_confidence = curr_obstacles[i].confidence;
             
             trackers_.push_back(new_tracker);
 
@@ -264,7 +266,8 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
         onboardDetector::ObstacleTracker new_tracker;
 
         new_tracker.initWithFeature(curr_obstacles[idx].centroid_measurement, curr_obstacles[idx].dimension, curr_obstacles[idx].feature, current_time, global_tracker_id_);
-        new_tracker.updateWithFeature(curr_obstacles[idx].centroid_measurement, curr_obstacles[idx].dimension, curr_obstacles[idx].feature, current_time);
+        // Do not immediately update with the same measurement/timestamp:
+        // velocity warm-start needs two distinct observations.
         new_tracker.last_confidence = curr_obstacles[idx].confidence;
         trackers_.push_back(new_tracker);
         
