@@ -55,15 +55,20 @@ tracker_node:
   COARSE_OUTPUT_FRAME: "odom"
 
 rematch_node:
-  SIMILARITY_THRESHOLD: 0.71
-  SIMILARITY_WEIGHT: 0.8
+  SIMILARITY_THRESHOLD: 0.45  # lowered from 0.71 to reduce FN from CLIP feature mismatches
+  SIMILARITY_WEIGHT: 0.6      # lowered from 0.8 to reduce feature dominance over geometry
 
-  IOU_THRESHOLD: 0.1
+  IOU_THRESHOLD: -0.1
   IOU_WEIGHT: 0.5
-  
-  VELOCITY_DIFF_THRESHOLD: 0.5
-  VELOCITY_DIFF_WEIGHT: 0.5
-  MAX_TRACKER_AGE : 0.0 # seconds, max age of a tracker without updates
+
+  DISTANCE_THRESHOLD: 1.0     # ADDED — was using C++ default 0.1m, which rejected
+                               # virtually every tracker-detection pair >10 cm apart.
+                               # 1.0 m is a reasonable gate for moving obstacles at 15 Hz.
+  DISTANCE_WEIGHT: 0.5         # ADDED — explicit (matches C++ default)
+
+  VELOCITY_DIFF_THRESHOLD: 0.5   # NOTE: these params are not consumed by the current
+  VELOCITY_DIFF_WEIGHT: 0.5      # C++ rematch code; DISTANCE_THRESHOLD/WEIGHT replaced them.
+  MAX_TRACKER_AGE : 1.0 # seconds, max age of a tracker without updates
   REMATCH_VIS_FRAME: "odom"
   # Output frame id (frame_id stamped on tracker_details consumed downstream).
   # Must equal the frame KF state lives in.

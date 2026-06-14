@@ -109,7 +109,8 @@ class ParaClipNode:
         rospy.loginfo(f"Processing {len(obstacles_msg.box_ids)} obstacles")
         time_start = time.time()
 
-        # Phase 1: extract masks and ROIs for all obstacles
+        # Phase 1: extract masks and ROIs for all obstacles. Keep the original
+        # obstacle index so output features stay aligned with box_ids.
         roi_data = []  # (index, box_id, roi)
         masks = []
         for i, box_id in enumerate(obstacles_msg.box_ids):
@@ -133,8 +134,11 @@ class ParaClipNode:
 
         processing_stats['preprocess_time'] = time.time() - time_start
 
-        # Phase 2: batch CLIP inference (single GPU forward pass)
-        features = []
+        # Phase 2: batch CLIP inference (single GPU forward pass). The
+        # downstream rematch node indexes features by box_ids index, so every
+        # obstacle must get one feature entry even if its ROI was invalid.
+        dummy_feature = np.array([1.0, 1.0, 1.0])
+        features = [dummy_feature.copy() for _ in obstacles_msg.box_ids]
         valid_rois = []
         if roi_data and self.config.RUN_CLIP:
             batch_rois = [d[2] for d in roi_data]
@@ -146,13 +150,13 @@ class ParaClipNode:
 
             if batch_features is not None:
                 for idx, feat in enumerate(batch_features):
-                    features.append(feat)
+                    original_idx = roi_data[idx][0]
+                    features[original_idx] = feat
                     valid_rois.append(roi_data[idx][2])
                     processing_stats['processed_count'] += 1
         elif roi_data:
             # RUN_CLIP disabled — return dummy features
             for _, _, roi in roi_data:
-                features.append(np.array([1.0, 1.0, 1.0]))
                 valid_rois.append(roi)
                 processing_stats['processed_count'] += 1
 

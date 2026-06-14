@@ -7,6 +7,7 @@ logic, distinct publisher topology) stay in each node.
 """
 
 import cv2
+import numpy as np
 import rospy
 from std_msgs.msg import Float32MultiArray
 from umap.msg import Obstacles
@@ -97,8 +98,21 @@ def build_obstacles_message(original_msg, features, binary_mask=None):
     for attr in _OBSTACLE_FIELDS:
         setattr(processed_msg, attr, getattr(original_msg, attr))
 
+    aligned_features = list(features)
+    n_obstacles = len(original_msg.box_ids)
+    if len(aligned_features) != n_obstacles:
+        rospy.logwarn(
+            "Feature count (%d) does not match obstacle count (%d); "
+            "padding/truncating to preserve index alignment.",
+            len(aligned_features), n_obstacles)
+
+    if len(aligned_features) > n_obstacles:
+        aligned_features = aligned_features[:n_obstacles]
+    while len(aligned_features) < n_obstacles:
+        aligned_features.append(np.array([1.0, 1.0, 1.0]))
+
     processed_msg.features = []
-    for feature in features:
+    for feature in aligned_features:
         feature_msg = Float32MultiArray()
         feature_msg.data = feature.flatten().tolist()
         processed_msg.features.append(feature_msg)

@@ -29,19 +29,34 @@ class ModelManager:
         self._initialize_models()
     
     def _initialize_models(self):
-        """Initialize CLIP and FastSAM models"""
+        """Initialize CLIP and FastSAM models on demand.
+
+        Only models that are actually needed (per RUN_SAM / RUN_CLIP) are
+        loaded onto the GPU.  Loading both unconditionally wastes ~1 GB of
+        VRAM per Python process (2 nodes × 2 models ≈ 2 GB total), which can
+        cause GPU memory pressure and cascade into upstream pipeline failures.
+        """
         try:
-            rospy.loginfo(f"Initializing models on device: {self.device}")
-            
-            # Initialize FastSAM
-            self.fastsam_model = FastSAM(self.config.FASTSAM_WEIGHTS_PATH)
-            
-            # Initialize CLIP
-            self.clip_model, self.clip_preprocess = clip.load(
-                self.config.CLIP_MODEL_NAME, device=self.device)
-            
+            rospy.loginfo(f"Initializing models on device: {self.device}"
+                          f"  (run_sam={self.config.RUN_SAM}, run_clip={self.config.RUN_CLIP})")
+
+            self.fastsam_model = None
+            self.clip_model = None
+            self.clip_preprocess = None
+
+            if self.config.RUN_SAM:
+                rospy.loginfo("Loading FastSAM model...")
+                self.fastsam_model = FastSAM(self.config.FASTSAM_WEIGHTS_PATH)
+                rospy.loginfo("FastSAM model loaded.")
+
+            if self.config.RUN_CLIP:
+                rospy.loginfo("Loading CLIP model...")
+                self.clip_model, self.clip_preprocess = clip.load(
+                    self.config.CLIP_MODEL_NAME, device=self.device)
+                rospy.loginfo("CLIP model loaded.")
+
             rospy.loginfo("Models initialized successfully")
-            
+
         except Exception as e:
             rospy.logerr(f"Failed to initialize models: {e}")
             raise

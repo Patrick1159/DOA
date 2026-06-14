@@ -1,4 +1,5 @@
-#!/home/user/miniconda3/envs/oa/bin/python3
+#!/home/patrick/miniconda3/envs/fastsam/bin/python3
+
 """
 Subscribe CLIP and SAM messages, publish full /model_output/obstacles message.
 
@@ -24,12 +25,34 @@ from model_manager import ModelManager
 from utils import ImageProcessor, ColorGenerator
 
 class ParaMsgAggregator:
-    """Aggregate synchronized SAM and CLIP messages for ParaCLIP processing"""
+    """Aggregate synchronized SAM and CLIP messages for ParaCLIP processing.
+
+    Two modes:
+      - passthrough_clip=false (default): ApproximateTimeSynchronizer on SAM+CLIP.
+        Both must arrive within sync_slop for a frame to be published.
+      - passthrough_clip=true: SAM-triggered mode. CLIP messages are cached
+        on arrival; each SAM message immediately triggers publication with the
+        most recently cached CLIP features.  Use when CLIP is in dummy mode
+        (run_clip=false) so the aggregator does not wait on a stream whose
+        features are not consumed by detailed_match anyway.
+      - passthrough_sam=true: CLIP-triggered mode. Each CLIP message is
+        published with its own geometry/features, using an empty CLIP mask.
+        Use when SAM is disabled so no cached dummy-SAM frame can become the
+        geometry source.
+    """
 
     def __init__(self):
         # Tunable synchronization parameters
         sync_slop = rospy.get_param("~sync_slop", 0.5)  # seconds tolerance for approximate sync
         sync_queue = rospy.get_param("~sync_queue", 20)  # queue size for message filters
+        self.passthrough_clip = rospy.get_param("~passthrough_clip", False)
+        self.passthrough_sam = rospy.get_param("~passthrough_sam", False)
+        if self.passthrough_clip and self.passthrough_sam:
+            rospy.logwarn(
+                "Both passthrough_clip and passthrough_sam requested; "
+                "using passthrough_clip and ignoring passthrough_sam."
+            )
+            self.passthrough_sam = False
 
         # Initialize transformation matrix and pose status
         self.cam_to_world = np.eye(4)
@@ -39,21 +62,37 @@ class ParaMsgAggregator:
         self.obstacle_pub = rospy.Publisher('/model_output/obstacles', Obstacles, queue_size=10)
         self.statistics_pub = rospy.Publisher('/rematch_statistics_aggregator', RematchStatistics, queue_size=10)
 
-        # Subscribers (message_filters for time sync)
+        # Subscribers
         cam_pose_sub = rospy.Subscriber('/camera/current_pose', PoseStamped, self.pose_callback)
 
-        sam_sub = message_filters.Subscriber('/model_output/obstacles_sam', Obstacles)
-        clip_sub = message_filters.Subscriber('/model_output/obstacles_clip', Obstacles)
-
-        # Approximate time synchronizer to handle rate differences and small delays
-        self.ts = message_filters.ApproximateTimeSynchronizer(
-            [sam_sub, clip_sub], queue_size=sync_queue, slop=sync_slop, allow_headerless=False
-        )
-        self.ts.registerCallback(self._synced_callback)
-
-        rospy.loginfo(
-            f"ParaMsgAggregator initialized with ApproximateTimeSynchronizer (queue={sync_queue}, slop={sync_slop}s)."
-        )
+        if self.passthrough_clip:
+            # Passthrough mode: SAM triggers publication; CLIP is only cached.
+            self._cached_clip_msg = None
+            self._sam_sub = rospy.Subscriber('/model_output/obstacles_sam', Obstacles,
+                                             self._sam_passthrough_callback)
+            self._clip_sub = rospy.Subscriber('/model_output/obstacles_clip', Obstacles,
+                                              self._clip_cache_callback)
+            rospy.loginfo("ParaMsgAggregator initialized in passthrough_clip mode "
+                          "(SAM-triggered, CLIP cached).")
+        elif self.passthrough_sam:
+            # Passthrough mode: CLIP triggers publication and supplies both
+            # geometry and appearance features. No SAM stream is consumed.
+            self._clip_sub = rospy.Subscriber('/model_output/obstacles_clip', Obstacles,
+                                              self._clip_passthrough_callback)
+            rospy.loginfo("ParaMsgAggregator initialized in passthrough_sam mode "
+                          "(CLIP-triggered, CLIP geometry).")
+        else:
+            # Time-synchronized mode (existing behaviour)
+            sam_sub = message_filters.Subscriber('/model_output/obstacles_sam', Obstacles)
+            clip_sub = message_filters.Subscriber('/model_output/obstacles_clip', Obstacles)
+            self.ts = message_filters.ApproximateTimeSynchronizer(
+                [sam_sub, clip_sub], queue_size=sync_queue, slop=sync_slop, allow_headerless=False
+            )
+            self.ts.registerCallback(self._synced_callback)
+            rospy.loginfo(
+                f"ParaMsgAggregator initialized with ApproximateTimeSynchronizer "
+                f"(queue={sync_queue}, slop={sync_slop}s)."
+            )
 
     def pose_callback(self, msg: PoseStamped):
         """Subcribe camera pose topic and compute cam_to_world transformation matrix"""
@@ -79,9 +118,51 @@ class ParaMsgAggregator:
         self.cam_to_world[2, 3] = msg.pose.position.z
 
         self.has_pose = True
-        
+
         # rospy.loginfo_throttle(1.0, "Updated camera pose transformation matrix")
         # rospy.loginfo(f"Camera to World Transformation Matrix:\n{self.cam_to_world}")
+
+    def _clip_cache_callback(self, clip_msg: Obstacles):
+        """Passthrough mode: cache the most recent CLIP message."""
+        self._cached_clip_msg = clip_msg
+
+    def _sam_cache_callback(self, sam_msg: Obstacles):
+        """Passthrough mode: cache the most recent SAM message."""
+        self._cached_sam_msg = sam_msg
+
+    def _sam_passthrough_callback(self, sam_msg: Obstacles):
+        """Passthrough mode: publish on SAM arrival using cached CLIP features.
+
+        If no CLIP message has been cached yet, synthesise a minimal dummy
+        CLIP message so publication can proceed immediately.
+        """
+        if self._cached_clip_msg is None:
+            # Build a minimal CLIP message with empty features.  In
+            # passthrough_clip mode the caller guarantees that CLIP features
+            # are not consumed by detailed_match (SIMILARITY_THRESHOLD=-1,
+            # SIMILARITY_WEIGHT=0), so dummy features are harmless.
+            dummy_clip = Obstacles()
+            dummy_clip.header = sam_msg.header
+            dummy_clip.features = []
+            self._cached_clip_msg = dummy_clip
+            rospy.logwarn_throttle(5.0,
+                "[Aggregator] Passthrough mode: no CLIP message cached yet, "
+                "using empty features for this frame."
+            )
+        self._synced_callback(sam_msg, self._cached_clip_msg)
+
+    def _clip_passthrough_callback(self, clip_msg: Obstacles):
+        """Passthrough mode: publish on CLIP arrival using CLIP geometry."""
+        clip_as_geometry = Obstacles()
+        clip_as_geometry.header = clip_msg.header
+        for attr in [
+            'box_ids', 'centroid_x', 'centroid_y', 'centroid_z',
+            'thickness', 'height', 'width', 'box_x', 'box_y',
+            'box_width', 'box_height', 'observed'
+        ]:
+            setattr(clip_as_geometry, attr, getattr(clip_msg, attr))
+        clip_as_geometry.binary_mask = clip_msg.binary_mask
+        self._synced_callback(clip_as_geometry, clip_msg)
 
     def _synced_callback(self, sam_msg: Obstacles, clip_msg: Obstacles):
         """Callback when SAM and CLIP messages are time-synchronized"""

@@ -13,13 +13,13 @@ class ExtractorConfig:
     # Processing parameters
     FOREGROUND_ONLY = False
     BOOST_CLIP = True
-    RUN_SAM =True
+    RUN_SAM = True
     RUN_CLIP = True
     ENABLE_MASK_DEBUG = True  # Enable mask debug visualization
     PARALLEL = True
     
     # SAM parameters
-    SAM_CONFIDENCE = 0.7
+    SAM_CONFIDENCE = 0.35
     SAM_IOU = 0.8
     SAM_IMAGE_SIZE = 64
     SAM_BATCH_SIZE = 12  # Batch inference - adjust based on GPU memory (2-8 recommended)

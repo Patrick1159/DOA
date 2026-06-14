@@ -1,4 +1,5 @@
-#!/home/user/miniconda3/envs/oa/bin/python3
+#!/home/patrick/miniconda3/envs/fastsam/bin/python3
+
 import rospy
 from geometry_msgs.msg import PoseStamped
 import tf.transformations

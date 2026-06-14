@@ -165,7 +165,58 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
                         if (!(in_bbox && in_mask))
                             continue;
                     }
-                    
+
+                }
+                else if (static_only) { // dynamic_only 的反操作：剔除 dynamic 区域内的点
+                    if (segmentation_mode == 0) {
+                        // 落在任意一个 dynamic depth+bbox 内则丢弃
+                        bool in_depth = false;
+                        for (const auto& depth_limit : curr_depth_ranges) {
+                            if (p.z >= depth_limit.min_depth && p.z <= depth_limit.max_depth) {
+                                in_depth = true;
+                                break;
+                            }
+                        }
+                        bool in_bbox = false;
+                        for (const auto& edge_pt : curr_edge_pts) {
+                            if (n >= edge_pt.top_left_pt.first && n <= edge_pt.top_right_pt.first &&
+                                m >= edge_pt.top_left_pt.second && m <= edge_pt.bottom_left_pt.second) {
+                                in_bbox = true;
+                                break;
+                            }
+                        }
+                        if (in_depth && in_bbox)
+                            continue;
+                    } else if (segmentation_mode == 1) {
+                        bool in_mask = false;
+                        for (const auto& mask : curr_masks) {
+                            if (mask.at<uchar>(m, n) != 0) {
+                                in_mask = true;
+                                break;
+                            }
+                        }
+                        if (in_mask)
+                            continue;
+                    } else if (segmentation_mode == 2) {
+                        // 保守剔除：bbox 或 mask 任一命中即视为 dynamic 并丢弃
+                        bool in_bbox = false;
+                        for (const auto& edge_pt : curr_edge_pts) {
+                            if (n >= edge_pt.top_left_pt.first && n <= edge_pt.top_right_pt.first &&
+                                m >= edge_pt.top_left_pt.second && m <= edge_pt.bottom_left_pt.second) {
+                                in_bbox = true;
+                                break;
+                            }
+                        }
+                        bool in_mask = false;
+                        for (const auto& mask : curr_masks) {
+                            if (mask.at<uchar>(m, n) != 0) {
+                                in_mask = true;
+                                break;
+                            }
+                        }
+                        if (in_bbox || in_mask)
+                            continue;
+                    }
                 }
 
                 // 把p加入到点云中
@@ -235,9 +286,22 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
         // ROS_INFO("Points after self cluster filter: %ld", filtered_self_pc->size());
 
         global_pc.reset(new pcl::PointCloud<pcl::PointXYZRGB>);
-        
-        pcl::transformPointCloud(*filtered_self_pc, *global_pc, cam_to_world); 
+
+        pcl::transformPointCloud(*filtered_self_pc, *global_pc, cam_to_world);
         // ROS_INFO("Final points after all filters: %d", base_pc->size());
+
+        // static_only 模式下：world frame 中沿 z 轴剔除地面点
+        // 仅在 static_only 启用时生效，不影响 DOA 主线（dynamic_only 路径）
+        if (static_only) {
+            pcl::PassThrough<pcl::PointXYZRGB> pass_ground;
+            pass_ground.setInputCloud(global_pc);
+            pass_ground.setFilterFieldName("z");
+            pass_ground.setFilterLimits(static_ground_z_max, 1e6);
+            pcl::PointCloud<pcl::PointXYZRGB>::Ptr no_ground_pc(
+                new pcl::PointCloud<pcl::PointXYZRGB>);
+            pass_ground.filter(*no_ground_pc);
+            global_pc = no_ground_pc;
+        }
 
         sensor_msgs::PointCloud2 pc_msg;
         pcl::toROSMsg(*global_pc,pc_msg);
