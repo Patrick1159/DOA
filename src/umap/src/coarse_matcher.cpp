@@ -3,6 +3,7 @@
 
 #include <umap/coarse_match.h>
 #include <umap/match_utils.hpp>
+#include <umap/cost_guard.h>
 #include <umap/utils.h>
 #include <munkres/munkres.h>
 
@@ -100,6 +101,11 @@ bool trackerNode::isDynamicTracker(onboardDetector::ObstacleTracker& tracker) co
     return isDynamic;
 }
 
+/// @brief True if centroid and size are all finite (never feed anything else to the KF).
+static inline bool isFiniteMeasurement(const Eigen::Vector3d& centroid, const Eigen::Vector3d& size) {
+    return umap::match_utils::allFinite(centroid) && umap::match_utils::allFinite(size);
+}
+
 /// @brief Get Munkres cost matrix between trackers and measurements.
 /// @param trackers
 /// @param measurements
@@ -155,17 +161,34 @@ Eigen::MatrixXd trackerNode::getCost_matrix(std::vector<onboardDetector::Obstacl
                 // 2. Distance cost (Euclidean)
                 double distance = (center_of_tracker - center_of_detection).norm();
                 
+                bool gated = false;
                 if (iou < iou_threshold) {
                     iou_cost = 999999.0;
+                    gated = true;
                     invalid_match_mapping_[i].push_back(j); // 记录无效匹配(tracker_idx, detection_idx)
                     // ROS_INFO("[Coarse tracker] Invalid match: T[%d] vs D[%d] - IoU: %.3f < threshold: %.3f", i, j, iou, iou_threshold);
                 }else if (distance > dist_threshold) {
                     iou_cost = 999999.0;
+                    gated = true;
                     invalid_match_mapping_[i].push_back(j);
                     // ROS_INFO("[Coarse tracker] Invalid match: T[%d] vs D[%d] - Distance: %.3f > threshold: %.3f", i, j, distance, dist_threshold);
                 }
 
                 cost_matrix(i, j) = iou_weight * iou_cost + dist_weight * distance;
+
+                // Non-finite guard: NaN/inf (e.g. from a NaN tracker state or
+                // measurement) is neither < iou_threshold nor > dist_threshold,
+                // so it would slip through the gates and hang Munkres::solve.
+                // Treat it as a gated (invalid) pair.
+                if (!std::isfinite(cost_matrix(i, j))) {
+                    ROS_WARN_THROTTLE(1.0, "[Coarse tracker] Non-finite cost for T[%d] vs D[%d] "
+                                           "(tracker pos [%f %f %f], detection [%f %f %f]) -> gated",
+                                      i, j,
+                                      center_of_tracker.x(), center_of_tracker.y(), center_of_tracker.z(),
+                                      center_of_detection.x(), center_of_detection.y(), center_of_detection.z());
+                    cost_matrix(i, j) = umap::match_utils::kCostGate;
+                    if (!gated) invalid_match_mapping_[i].push_back(j);
+                }
 
                 // ROS_INFO("[Coarse tracker] T[%d] vs D[%d]: dist=%.3f cost=%.3f iou=%.3f", 
                 //     i, j, (center_of_tracker - center_of_detection).norm(), cost_matrix(i, j), iou);
@@ -199,17 +222,27 @@ std::vector<std::pair<int, int>> trackerNode::association(const Eigen::MatrixXd&
     if (cost_matrix.rows() == 0 || cost_matrix.cols() == 0) {
         return {};
     }
-    if (cost_matrix.rows() == 1 && cost_matrix.cols() == 1 && cost_matrix(0, 0) > 1) {
-        // No match! Too different
+    if (cost_matrix.rows() == 1 && cost_matrix.cols() == 1 && !(cost_matrix(0, 0) <= 1)) {
+        // No match! Too different (or non-finite, which the old `> 1` test let through)
         return {};
     }
     
     Matrix<double> munkres_matrix(cost_matrix.rows(), cost_matrix.cols());
-    
+
+    // Last line of defence: Munkres<double>::solve never returns on NaN
+    // input. getCost_matrix() already gates non-finite entries; if any is
+    // still present, replace it here and never call solve() with it.
+    Eigen::MatrixXd safe_cost = cost_matrix;
+    const int n_replaced = umap::match_utils::sanitizeCostMatrix(safe_cost);
+    if (n_replaced > 0) {
+        ROS_ERROR_THROTTLE(1.0, "[Coarse tracker] association(): %d non-finite cost entries replaced by gate "
+                                "before Munkres::solve", n_replaced);
+    }
+
     // Convert Eigen matrix to Munkres matrix format
-    for(size_t i = 0; i < cost_matrix.rows(); ++i) {
-        for(size_t j = 0; j < cost_matrix.cols(); ++j) {
-            munkres_matrix(i,j) = cost_matrix(i,j);
+    for(size_t i = 0; i < safe_cost.rows(); ++i) {
+        for(size_t j = 0; j < safe_cost.cols(); ++j) {
+            munkres_matrix(i,j) = safe_cost(i,j);
         }
     }
 
@@ -304,6 +337,10 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
     // If no trackers exist yet, initialize them
     if (trackers_.empty()) {
         for (size_t i = 0; i < measurements.size(); i++) {
+            if (!isFiniteMeasurement(measurements[i], bbox_sizes[i])) {
+                ROS_ERROR_THROTTLE(1.0, "[Coarse tracker] refusing to init tracker from non-finite measurement %zu", i);
+                continue;
+            }
             onboardDetector::ObstacleTracker new_tracker;
             std::string uuid = umap::generate_uuid(); // TODO: to finish for uuid
             new_tracker.init(measurements[i], bbox_sizes[i], current_time, nextAvailableTrackerId, uuid);
@@ -343,6 +380,11 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
         int measurement_idx = match.second;
 
         if (tracker_idx < trackers_.size() && measurement_idx < measurements.size()) {
+            if (!isFiniteMeasurement(measurements[measurement_idx], bbox_sizes[measurement_idx])) {
+                ROS_ERROR_THROTTLE(1.0, "[Coarse tracker] refusing to feed non-finite measurement %d to tracker %d",
+                                   measurement_idx, tracker_idx);
+                continue;
+            }
             // Update tracker with new measurement
             trackers_[tracker_idx].update(measurements[measurement_idx],bbox_sizes[measurement_idx], current_time, params_.HISTORY_SIZE);
             trackers_[tracker_idx].was_dimension_expanded = false; // Reset flag when getting new measurements
@@ -373,6 +415,10 @@ void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurement
     // Handle unmatched detections
     std::vector<int> unmatched = umap::match_utils::findUnmatchedDetections(matched_pairs, measurements.size());
     for (int idx : unmatched) {
+        if (!isFiniteMeasurement(measurements[idx], bbox_sizes[idx])) {
+            ROS_ERROR_THROTTLE(1.0, "[Coarse tracker] refusing to init tracker from non-finite measurement %d", idx);
+            continue;
+        }
         onboardDetector::ObstacleTracker new_tracker;
         std::string uuid = umap::generate_uuid();
         new_tracker.init(measurements[idx], bbox_sizes[idx], current_time, nextAvailableTrackerId, uuid);

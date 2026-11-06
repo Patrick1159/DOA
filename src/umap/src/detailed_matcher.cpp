@@ -3,8 +3,18 @@
 
 #include <umap/rematch.h>
 #include <umap/match_utils.hpp>
+#include <umap/cost_guard.h>
 #include <munkres/munkres.h>
 #include <numeric>
+#include <algorithm>
+#include <cmath>
+
+/// @brief True if centroid, dimension and CLIP feature are all finite (never feed anything else to the KF).
+static inline bool isFiniteObstacle(const rematchNode::ObstacleMeasureFeature& o) {
+    if (!umap::match_utils::allFinite(o.centroid_measurement) || !umap::match_utils::allFinite(o.dimension)) return false;
+    for (float f : o.feature) if (!std::isfinite(f)) return false;
+    return true;
+}
 
 /// @brief Get cost matrix based on the Euclidean distance between trackers and measurements(for Munkres algorithm).
 /// @param trackers
@@ -92,6 +102,16 @@ Eigen::MatrixXd rematchNode::getCostMatrix(std::vector<onboardDetector::Obstacle
                 ROS_INFO_NAMED("Rematch", "\033[1;32m  [MATCH SUCCESS] Tracker %zu <-> Detection %zu: IoU=%.3f, Similarity=%.3f, Distance=%.3f, Cost=%.6f\033[0m",
                          i, j, iou, cosine_similarity, distance, cost_matrix(i, j));
             }
+
+            // Non-finite guard: never let NaN/inf reach Munkres::solve (it
+            // never returns on NaN). Treat as a gated, invalid pair.
+            if (!std::isfinite(cost_matrix(i, j))) {
+                ROS_WARN_THROTTLE(1.0, "[Rematch] Non-finite cost for T[%zu] vs D[%zu] -> gated", i, j);
+                cost_matrix(i, j) = umap::match_utils::kCostGate;
+                const auto& inv = invalid_match_mapping_[i];
+                if (std::find(inv.begin(), inv.end(), static_cast<int>(j)) == inv.end())
+                    invalid_match_mapping_[i].push_back(j);
+            }
         }
     }
 
@@ -119,12 +139,21 @@ std::vector<std::pair<int, int>> rematchNode::association(Eigen::MatrixXd &cost_
     if (cost_matrix.rows() == 0 || cost_matrix.cols() == 0)
         return {};
 
-    if (cost_matrix.rows() == 1 && cost_matrix.cols() == 1 && cost_matrix(0, 0) > 1) {
+    if (cost_matrix.rows() == 1 && cost_matrix.cols() == 1 && !(cost_matrix(0, 0) <= 1)) {
         ROS_ERROR("1 tracker: No match! Cost matrix is too large.");
         return {};
     }
 
     Matrix<double> munkres_matrix(cost_matrix.rows(), cost_matrix.cols());
+
+    // Last line of defence: Munkres<double>::solve never returns on NaN input.
+    {
+        const int n_replaced = umap::match_utils::sanitizeCostMatrix(cost_matrix);
+        if (n_replaced > 0) {
+            ROS_ERROR_THROTTLE(1.0, "[Rematch] association(): %d non-finite cost entries replaced by gate "
+                                    "before Munkres::solve", n_replaced);
+        }
+    }
     for (size_t i = 0; i < cost_matrix.rows(); ++i)
         for (size_t j = 0; j < cost_matrix.cols(); ++j)
             munkres_matrix(i, j) = cost_matrix(i, j);
@@ -215,6 +244,10 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
     // 0. 若tracker列表为空，则直接将观测的obstacles转为tracker加入
     if (trackers_.empty()) {
         for (size_t i = 0; i < curr_obstacles.size(); i++) {
+            if (!isFiniteObstacle(curr_obstacles[i])) {
+                ROS_ERROR_THROTTLE(1.0, "[Rematch] refusing to init tracker from non-finite obstacle %zu", i);
+                continue;
+            }
             onboardDetector::ObstacleTracker new_tracker;
             new_tracker.initWithFeature(curr_obstacles[i].centroid_measurement, curr_obstacles[i].dimension, curr_obstacles[i].feature, current_time, global_tracker_id_);
             // Do not immediately update with the same measurement/timestamp:
@@ -247,6 +280,11 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
         int measurement_idx = match.second;
 
         if (tracker_idx < trackers_.size() && measurement_idx < curr_obstacles.size()) {
+            if (!isFiniteObstacle(curr_obstacles[measurement_idx])) {
+                ROS_ERROR_THROTTLE(1.0, "[Rematch] refusing to feed non-finite obstacle %d to tracker %d",
+                                   measurement_idx, tracker_idx);
+                continue;
+            }
             trackers_[tracker_idx].updateWithFeature(curr_obstacles[measurement_idx].centroid_measurement, curr_obstacles[measurement_idx].dimension,curr_obstacles[measurement_idx].feature, current_time);
             trackers_[tracker_idx].was_dimension_expanded = false; // Reset flag when getting new measurements
             trackers_[tracker_idx].last_confidence = curr_obstacles[measurement_idx].confidence;
@@ -264,6 +302,10 @@ void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureF
     std::vector<int> unmatched = umap::match_utils::findUnmatchedDetections(matched_pairs, curr_obstacles.size());
     // 4.2. 创建new_tracker并加入
     for (int idx : unmatched) {
+        if (!isFiniteObstacle(curr_obstacles[idx])) {
+            ROS_ERROR_THROTTLE(1.0, "[Rematch] refusing to init tracker from non-finite obstacle %d", idx);
+            continue;
+        }
         ROS_INFO_STREAM("Creating new tracker for unmatched detection " << idx);
         onboardDetector::ObstacleTracker new_tracker;
 

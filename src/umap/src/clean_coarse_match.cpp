@@ -2,6 +2,7 @@
 /// @brief Coarse match ROS node entry point — subscribers, publishers, parameter loading, callbacks, main()
 
 #include <umap/coarse_match.h>
+#include <umap/cost_guard.h>
 #include <geometry_msgs/PointStamped.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
@@ -79,14 +80,35 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     std::vector<size_t> kept_indices;  // original boxes3D_msg index per kept measurement
 
     int tf_failure_count = 0;
+    int nonfinite_count = 0;  // detections dropped because centroid/size is NaN/inf
     for (size_t i = 0; i < boxes3D_msg.box_ids.size(); i++) {
         Eigen::Vector3d measurement_src, measurement_out, size;
         measurement_src << boxes3D_msg.x[i], boxes3D_msg.y[i], boxes3D_msg.z[i];
+        size << boxes3D_msg.width[i], boxes3D_msg.height[i], boxes3D_msg.thickness[i];
+
+        // Non-finite guard (source): a NaN measurement would poison the KF
+        // state and make every cost row NaN (Munkres then never returns).
+        if (!umap::match_utils::allFinite(measurement_src) || !umap::match_utils::allFinite(size)) {
+            ++nonfinite_count;
+            ROS_WARN_THROTTLE(1.0, "[Coarse tracker] Box %zu dropped: non-finite source centroid/size"
+                                   " src=[%f %f %f] size=[%f %f %f]", i,
+                              measurement_src.x(), measurement_src.y(), measurement_src.z(),
+                              size.x(), size.y(), size.z());
+            continue;
+        }
 
         if (!transformPointToOutputFrame(measurement_src, source_frame, stamp, measurement_out, tf_failure_count)) {
             // TF lookup failed — skip this detection entirely. KF will only
             // predict() for matched trackers in this frame, preserving
             // output-frame state semantics. First failure is warned inside the helper.
+            continue;
+        }
+
+        // Non-finite guard (transformed). NaN would otherwise pass the
+        // z < MIN_OBSTACLE_Z test below (comparison with NaN is false).
+        if (!umap::match_utils::allFinite(measurement_out)) {
+            ++nonfinite_count;
+            ROS_WARN_THROTTLE(1.0, "[Coarse tracker] Box %zu dropped: non-finite transformed centroid", i);
             continue;
         }
 
@@ -100,7 +122,6 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
             continue;
         }
 
-        size << boxes3D_msg.width[i], boxes3D_msg.height[i], boxes3D_msg.thickness[i];
         measurements.push_back(measurement_out);
         sizes.push_back(size);
         if (i < boxes3D_msg.mask.size()) {
@@ -155,7 +176,8 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     ROS_INFO_STREAM("[Coarse tracker] Frame summary: " << measurements.size()
                     << " of " << total_boxes << " boxes kept"
                     << " (dropped=" << (total_boxes - measurements.size())
-                    << ", tf_failures=" << tf_failure_count << ")");
+                    << ", tf_failures=" << tf_failure_count
+                    << ", nonfinite=" << nonfinite_count << ")");
 
     ROS_DEBUG_NAMED("Coarse tracker", "=================Frame end================");
 }

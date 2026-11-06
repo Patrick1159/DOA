@@ -1,6 +1,7 @@
 /// @file  clean_detailed_match.cpp
 /// @brief Detailed (re-match) ROS node entry point — subscribers, publishers, parameter loading, obstacles callback
 #include <umap/rematch.h>
+#include <umap/cost_guard.h>
 
 using namespace std::chrono;
 
@@ -66,6 +67,7 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
     std::vector<Eigen::Vector2d> HWboxes;
     std::vector<std::vector<float>> features;
     std::vector<rematchNode::ObstacleMeasureFeature> curr_obstacles;
+    int nonfinite_count = 0;  // detections dropped because centroid/size/feature is NaN/inf
 
     for (size_t i = 0; i < dync_obstacle_msg.box_ids.size(); i++)
     {
@@ -97,14 +99,25 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
             continue;
         }
 
-        // Get centroids
+        // Get centroids / dimensions and reject non-finite input before it
+        // can reach the KF or the cost matrix (Munkres hangs on NaN).
         Eigen::Vector3d centroid_measurement;
         centroid_measurement << dync_obstacle_msg.centroid_x[i], dync_obstacle_msg.centroid_y[i], dync_obstacle_msg.centroid_z[i];
-        centroid_measurements.push_back(centroid_measurement);
-
-        // Get dimensions
         Eigen::Vector3d dimension;
         dimension << dync_obstacle_msg.width[i], dync_obstacle_msg.height[i], dync_obstacle_msg.thickness[i];
+        bool feature_finite = true;
+        for (size_t j = 0; j < dync_obstacle_msg.features[i].data.size(); j++) {
+            if (!std::isfinite(dync_obstacle_msg.features[i].data[j])) { feature_finite = false; break; }
+        }
+        if (!umap::match_utils::allFinite(centroid_measurement) ||
+            !umap::match_utils::allFinite(dimension) || !feature_finite) {
+            ++nonfinite_count;
+            ROS_WARN_THROTTLE(1.0, "[Rematch] Skip det %zu: non-finite centroid [%f %f %f] / size [%f %f %f] / feature(finite=%d)",
+                              i, centroid_measurement.x(), centroid_measurement.y(), centroid_measurement.z(),
+                              dimension.x(), dimension.y(), dimension.z(), static_cast<int>(feature_finite));
+            continue;
+        }
+        centroid_measurements.push_back(centroid_measurement);
         dimensions.push_back(dimension);
 
         // Get HW box
@@ -139,6 +152,8 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
     }
     curr_centroidMeasurements_ = centroid_measurements;
     curr_sizes_ = dimensions;
+    ROS_INFO("[Rematch] Frame summary: %zu of %zu obstacles kept (nonfinite=%d)",
+             curr_obstacles.size(), dync_obstacle_msg.box_ids.size(), nonfinite_count);
 
     // ── Profiling: parsing done ───────────────────────────────────────────────
     tp_parse_done_ = std::chrono::steady_clock::now();

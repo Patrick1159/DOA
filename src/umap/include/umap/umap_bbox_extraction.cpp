@@ -1,4 +1,5 @@
 #include "umapProcess.h"
+#include <umap/box_geometry.h>
 
 /// @brief A part of generate 2Dbox from histogram
 UVbox umapProcess::merge_two_UVbox(UVbox father, UVbox son){
@@ -271,6 +272,17 @@ void umapProcess::extract_2DboxRGB(const ros::Time& stamp, const cv::Mat& depth_
         }
 
         if (y_up < y_down) {
+            // Keep the 2D list index-aligned with the 3D list: drop exactly
+            // the boxes extract_3Dbox() drops (non-physical geometry, e.g.
+            // depth_in_near == 0), since downstream indexes both by box id.
+            umap::BoxGeometry geom_check;
+            if (!umap::boxGeometryFromUVBox(bb_U.x, bb_U.width, y_up, y_down,
+                                            depth_in_near / params_.depth_factor,
+                                            depth_in_far / params_.depth_factor,
+                                            params_.fx, params_.fy, params_.px, params_.py,
+                                            geom_check)) {
+                continue;
+            }
             // Draw rectangle on RGB image
             cv::Point pt1(x_start, y_up); // top-left
             cv::Point pt2(x_end, y_down); // bottom-right
@@ -310,6 +322,7 @@ void umapProcess::extract_2DboxRGB(const ros::Time& stamp, const cv::Mat& depth_
 void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val){
     boxes3D.clear();
     std::vector<cv::Mat> box_masks;
+    int skipped_nonphysical = 0;  // boxes rejected by umap::boxGeometryFromUVBox
 
     // current_frame_++;
 
@@ -373,29 +386,26 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
             //   thickness_view = thickness_z * |front_pt| / depth_in_near
             // so the box thickness in 3D matches what would be measured
             // along the same direction along which we just translated.
-            const float u_center = bb_U.x + bb_U.width / 2.0f;
-            const float v_center = (y_up + y_down) / 2.0f;
-
-            const float x_front = (u_center - params_.px) * depth_in_near / params_.fx;
-            const float y_front = (v_center - params_.py) * depth_in_near / params_.fy;
-            const float front_norm = std::sqrt(x_front * x_front +
-                                               y_front * y_front +
-                                               depth_in_near * depth_in_near);
-
-            const float thickness_z = depth_in_far - depth_in_near;
-            const float thickness_view = thickness_z * front_norm / depth_in_near;
-            const float scale = (front_norm + thickness_view / 2.0f) / front_norm;
-
-            curr_box.x = x_front * scale;
-            curr_box.y = y_front * scale;
-            curr_box.z = depth_in_near * scale;
-
+            // Geometry lives in <umap/box_geometry.h> (pure, unit-tested).
+            // It rejects non-physical boxes (depth_in_near ~ 0 when
+            // min_dist = 0 and the U-map bin is row 0 -> 0/0 = NaN) so that
+            // NaN never reaches the trackers.
+            umap::BoxGeometry geom;
+            if (!umap::boxGeometryFromUVBox(bb_U.x, bb_U.width, y_up, y_down,
+                                            depth_in_near, depth_in_far,
+                                            params_.fx, params_.fy, params_.px, params_.py,
+                                            geom)) {
+                ++skipped_nonphysical;
+                continue;
+            }
+            curr_box.x = geom.x;
+            curr_box.y = geom.y;
+            curr_box.z = geom.z;
             // Box dimensions: width/height are reprojected at the front
-            // face depth (consistent with the UV reprojection above);
-            // thickness is the view-ray-aligned extent.
-            curr_box.x_width = std::max(0.1f, bb_U.width * depth_in_near / params_.fx); // 宽度
-            curr_box.y_width = std::max(0.1f, (y_down - y_up) * depth_in_near / params_.fy); // 高度
-            curr_box.z_width = std::max(0.1f, thickness_view); // 厚度（沿视线）
+            // face depth; thickness is the view-ray-aligned extent.
+            curr_box.x_width = geom.x_width;
+            curr_box.y_width = geom.y_width;
+            curr_box.z_width = geom.z_width;
             boxes3D.push_back(curr_box);
 
             // 2.Create mask data
@@ -403,6 +413,12 @@ void umapProcess::extract_3Dbox(const ros::Time& stamp, const cv::Mat& depth_val
             box_masks.push_back(mask);
         }
     } // end for loop
+
+    if (skipped_nonphysical > 0) {
+        ROS_WARN_THROTTLE(1.0, "[umap] skipped %d non-physical 3D box(es) this frame "
+                               "(depth_in_near <= %.0e m or non-finite geometry)",
+                          skipped_nonphysical, static_cast<double>(umap::kMinBoxDepthM));
+    }
 
     // Publish 3D bounding boxes message
     umap::BoundingBoxes3D bbox3D_msg;

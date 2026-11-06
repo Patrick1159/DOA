@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <umap/ObstacleTracker.h>
+#include <umap/cost_guard.h>
 
 namespace umap {
 namespace match_utils {
