@@ -27,13 +27,13 @@
     <node pkg="umap" type="coarse_match" name="coarse_match_tracker" output="screen" />
 
     <!-- Feature Extractors (FastSAM + CLIP) -->
-    <node pkg="umap" type="para_samnode.py" name="para_sam_node" output="screen">
+    <node pkg="umap" type="para_samnode.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_sam_node" output="screen">
         <param name="image_topic" value="$(arg rgb_topic)" />
     </node>
-    <node pkg="umap" type="para_clipnode.py" name="para_clip_node" output="screen">
+    <node pkg="umap" type="para_clipnode.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_clip_node" output="screen">
         <param name="image_topic" value="$(arg rgb_topic)" />
     </node>
-    <node pkg="umap" type="para_aggregate.py" name="para_aggregate_node" output="screen"/>
+    <node pkg="umap" type="para_aggregate.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_aggregate_node" output="screen"/>
 
     <!-- Pointcloud Generator -->
     <node pkg="pointcloud_generator" type="camera_pose.py" name="d435_pose" output="screen">

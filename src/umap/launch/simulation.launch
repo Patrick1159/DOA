@@ -29,15 +29,15 @@
     <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
 
     <!-- Feature Extractor -->
-    <node pkg="umap" type="para_samnode.py" name="para_sam_node" output="screen" if="$(arg use_sam)">
+    <node pkg="umap" type="para_samnode.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_sam_node" output="screen" if="$(arg use_sam)">
         <param name="image_topic" value="$(arg rgb_topic)" />
     </node>
-    <node pkg="umap" type="para_clipnode.py" name="para_clip_node" output="screen">
+    <node pkg="umap" type="para_clipnode.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_clip_node" output="screen">
         <param name="image_topic" value="$(arg rgb_topic)" />
     </node>
     <!-- When SAM is off, aggregate passes CLIP geometry+features straight
          through instead of blocking on SAM masks (clean no-SAM ablation). -->
-    <node pkg="umap" type="para_aggregate.py" name="para_aggregate_node" output="screen">
+    <node pkg="umap" type="para_aggregate.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_aggregate_node" output="screen">
         <param name="passthrough_sam" value="$(eval not arg('use_sam'))" />
     </node>
     

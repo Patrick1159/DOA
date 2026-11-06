@@ -2,12 +2,12 @@
     <arg name="rgb_topic" default="/d400/color/image_raw" />
     <arg name="aligned_depth_topic" default="/d400/aligned_depth_to_color/image_raw" />
     <!-- Feature Extractor -->
-    <node pkg="umap" type="para_samnode.py" name="para_sam_node" output="screen">
+    <node pkg="umap" type="para_samnode.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_sam_node" output="screen">
         <param name="image_topic" value="$(arg rgb_topic)" />
     </node>
-    <node pkg="umap" type="para_clipnode.py" name="para_clip_node" output="screen">
+    <node pkg="umap" type="para_clipnode.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_clip_node" output="screen">
         <param name="image_topic" value="$(arg rgb_topic)" />
     </node>
-    <node pkg="umap" type="para_aggregate.py" name="para_aggregate_node" output="screen"/>
+    <node pkg="umap" type="para_aggregate.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="para_aggregate_node" output="screen"/>
     
 </launch>

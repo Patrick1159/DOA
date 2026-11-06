@@ -13,7 +13,7 @@
     <node pkg="tf2_ros" type="static_transform_publisher" name="d400_color_to_map" args="0 0 0 0 0 0 map d400_color_optical_frame" />
 
     <!-- Launch RViz for visualization -->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/cius/cleancode/src/umap/rviz/test_umap.rviz" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find umap)/rviz/test_umap.rviz" />
     
     <!-- Play rosbag -->
     <!-- <node pkg="rosbag" type="play" name="rosbag_play" args="/home/cius/rosbag/2025-04-02-19-05-04.bag" output="log" /> -->

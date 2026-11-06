@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <launch>
     <!-- Launch RViz for visualization -->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/cius/cleancode/src/umap/rviz/test_umap.rviz" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find umap)/rviz/test_umap.rviz" />
 
     <!-- UMAP -->
     <!-- Load parameters -->
@@ -24,7 +24,7 @@
     <node pkg="umap" type="detailed_match" name="detailed_match_tracker" output="screen" />
 
     <!-- Feature Extractor -->
-    <node pkg="umap" type="feature_extract.py" name="feature_extractor" output="screen">
+    <node pkg="umap" type="feature_extract.py" launch-prefix="$(optenv SCOT_PERCEPTION_PY python3)" name="feature_extractor" output="screen">
         <!-- Image topic parameter -->
         <param name="image_topic" value="/d400/color/image_raw" />
     </node>

@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/fastsam/bin/python3
+#!/usr/bin/env python3
 
 """
 Subscribe CLIP and SAM messages, publish full /model_output/obstacles message.

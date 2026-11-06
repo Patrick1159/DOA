@@ -1,4 +1,4 @@
-#!/home/cius/miniconda3/envs/DOA/bin/python3
+#!/usr/bin/env python3
 
 """
 Subscribe topic /human_pose1 to get ground truth PoseStamped messages, 
@@ -127,9 +127,9 @@ class GTAnalyse:
         if not hasattr(self, '_csv_setup_done'):
             # configure CSV path and lock on first callback
             if self.use_camera_transform:
-                self.csv_path = os.path.expanduser('/home/cius/DOA/src/benchmarks/occlusion_GT_camera_frame.csv')
+                self.csv_path = os.path.join(os.environ.get('SCOT_BENCHMARK_DIR', os.path.expanduser('~/DOA/src/benchmarks')), 'occlusion_GT_camera_frame.csv')
             else:
-                self.csv_path = os.path.expanduser('/home/cius/DOA/src/benchmarks/occlusion_GT_world_frame.csv')
+                self.csv_path = os.path.join(os.environ.get('SCOT_BENCHMARK_DIR', os.path.expanduser('~/DOA/src/benchmarks')), 'occlusion_GT_world_frame.csv')
             self._csv_lock = threading.Lock()
             self._csv_setup_done = True
 

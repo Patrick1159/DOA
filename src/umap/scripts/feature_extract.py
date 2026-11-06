@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/ros-noetic/bin/python3
+#!/usr/bin/env python3
 """
 Feature extraction node for dynamic obstacle tracking.
 Subscribes to dynamic obstacles and RGB images, extracts CLIP features and SAM segmentation results.

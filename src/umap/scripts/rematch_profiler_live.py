@@ -1,4 +1,4 @@
-#!/home/user/miniconda3/envs/oa/bin/python3
+#!/usr/bin/env python3
 """
 rematch_profiler_live.py
 ========================

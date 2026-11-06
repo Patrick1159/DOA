@@ -1,3 +1,4 @@
+import os
 import torch
 import rospy
 
@@ -6,8 +7,9 @@ class ExtractorConfig:
 
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     # Model paths
-    FASTSAM_LIB_PATH = "/home/patrick/FastSAM/"
-    FASTSAM_WEIGHTS_PATH = '/home/patrick/FastSAM/weights/FastSAM-s.pt'
+    FASTSAM_LIB_PATH = os.environ.get('SCOT_FASTSAM_DIR', os.path.expanduser('~/FastSAM'))
+    FASTSAM_WEIGHTS_PATH = os.path.join(
+        FASTSAM_LIB_PATH, 'weights', os.environ.get('SCOT_FASTSAM_WEIGHTS', 'FastSAM-s.pt'))
     CLIP_MODEL_NAME = "ViT-B/32"
     
     # Processing parameters

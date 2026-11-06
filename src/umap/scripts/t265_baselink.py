@@ -1,4 +1,4 @@
-#!/home/user/miniconda3/envs/oa/bin/python3
+#!/usr/bin/env python3
 
 """
 Publish a normalized camera frame based on T265 pose data.

@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/fastsam/bin/python3
+#!/usr/bin/env python3
 """
 CLIP process node, for parallel processing of images using FastSAM.
 """

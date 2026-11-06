@@ -1,4 +1,4 @@
-#!/home/patrick/miniconda3/envs/fastsam/bin/python3
+#!/usr/bin/env python3
 """
 Subscribes to dynamic obstacles and image topics, processes ROIs, and publishes results.
 """
