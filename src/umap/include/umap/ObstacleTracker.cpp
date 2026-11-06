@@ -127,7 +127,7 @@ void ObstacleTracker::update(const Eigen::Vector3d& measurement, const Eigen::Ve
     } else if (actual_dt <= 0.0) {
         dt = 0.033; // Default ~30fps
     } else {
-        dt = 0.1; // Fallback for large gaps
+        dt = actual_dt; // Large gap: use the real sensor-timeline interval
     }
 
     updateStateTransitionMatrix();
@@ -189,7 +189,7 @@ void ObstacleTracker::updateWithFeature(const Eigen::Vector3d& measurement, cons
     } else if (actual_dt <= 0.0) {
         dt = 0.033; // Default ~30fps
     } else {
-        dt = 0.1; // Fallback for large gaps
+        dt = actual_dt; // Large gap: use the real sensor-timeline interval
     }
     
     // Debug output for time step calculation
@@ -260,8 +260,10 @@ void ObstacleTracker::predictOnly(double current_time) {
     double actual_dt = current_time - lastUpdateTime;
     if (actual_dt > 0.0 && actual_dt < 1.0) {
         dt = actual_dt;
+    } else if (actual_dt <= 0.0) {
+        dt = 0.033; // Default ~30fps
     } else {
-        dt = 0.1; // Fallback
+        dt = actual_dt; // Large gap: use the real sensor-timeline interval
     }
     
     updateStateTransitionMatrix();

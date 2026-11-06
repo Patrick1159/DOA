@@ -162,7 +162,7 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
     tp_vis_done_ = std::chrono::steady_clock::now();
 
     try {
-        publishTrackerDetails(ros::Time::now().toSec());
+        publishTrackerDetails(dync_obstacle_msg.header.stamp.toSec());
     } catch (const std::exception& e) {
         ROS_ERROR_STREAM("Exception caught in ## publishTrackerDetails ##: " << e.what());
     }
@@ -171,7 +171,7 @@ void rematchNode::obstacles2Tracker(const umap::Obstacles &dync_obstacle_msg)
     {
         auto tp_end = std::chrono::steady_clock::now();
         umap::RematchStatistics stats;
-        stats.header.stamp    = ros::Time::now();
+        stats.header.stamp    = dync_obstacle_msg.header.stamp;
         stats.header.frame_id = "rematch_profiler";
 
         stats.num_detections    = stat_num_detections_;

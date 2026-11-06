@@ -73,7 +73,8 @@ private:
 
     bool dynamic_only; // 是否只保留动态障碍物
     bool static_only;  // 是否只保留静态点（dynamic_only 的反操作，供 ESDF static layer 使用）
-    double static_ground_z_max; // static_only 模式下, world frame 中 z<此值视为地面剔除
+    bool filter_ground; // 独立地面剔除：剔除 world frame 中 z<static_ground_z_max 的点，不做 dynamic 区域排除（供 FAPP 全量点云使用）
+    double static_ground_z_max; // world frame 中 z<此值视为地面剔除（static_only 或 filter_ground 启用时生效）
     int segmentation_mode; // 0为box mode; 1为mask mode; 2为都考虑
     struct edge_points{ // To store the edge points of the bounding box in pixel coordinates
         std::pair<int, int> top_left_pt;
@@ -131,6 +132,7 @@ public:
 
         nh_.param("pointcloud_generate/dynamic_only", dynamic_only, false);
         nh_.param("pointcloud_generate/static_only", static_only, false);
+        nh_.param("pointcloud_generate/filter_ground", filter_ground, false);
         nh_.param("pointcloud_generate/static_ground_z_max", static_ground_z_max, 0.05);
         nh_.param("pointcloud_generate/segmentation_mode", segmentation_mode, 0);
 

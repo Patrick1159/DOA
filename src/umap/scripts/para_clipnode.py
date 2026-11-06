@@ -50,7 +50,11 @@ class ParaClipNode:
         """Setup ROS subscribers and publishers"""
         # Subscribers
         image_topic = rospy.get_param('~image_topic', '/camera/rgb/image_raw')
-        self.image_sub = rospy.Subscriber(image_topic, Image, self._handle_image_message)
+        # buff_size must exceed one serialized frame (640x480x3 ~= 900KB), else
+        # rospy's default 64KB socket buffer backs up and image frames accumulate,
+        # growing latency without bound. Matches para_samnode.py fix.
+        self.image_sub = rospy.Subscriber(image_topic, Image, self._handle_image_message,
+                                          queue_size=1, buff_size=2**24)
         self.obstacles_sub = rospy.Subscriber(
             'tracker/dynamic_obstacles', Obstacles, self._process_dynamic_obstacles)
         

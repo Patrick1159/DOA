@@ -290,9 +290,11 @@ void PointCloudProcessor::depth_callback(const sensor_msgs::ImageConstPtr& msg){
         pcl::transformPointCloud(*filtered_self_pc, *global_pc, cam_to_world);
         // ROS_INFO("Final points after all filters: %d", base_pc->size());
 
-        // static_only 模式下：world frame 中沿 z 轴剔除地面点
-        // 仅在 static_only 启用时生效，不影响 DOA 主线（dynamic_only 路径）
-        if (static_only) {
+        // world frame 中沿 z 轴剔除地面点。
+        // static_only：剔除 dynamic 区域 + 去地面（ESDF static layer）。
+        // filter_ground：仅去地面，保留全量点云（FAPP 用：dense RGB-D 地面占 ~97% 点，
+        //                不剔除会让 mot_mapping 把地面误聚类成静态障碍物）。
+        if (static_only || filter_ground) {
             pcl::PassThrough<pcl::PointXYZRGB> pass_ground;
             pass_ground.setInputCloud(global_pc);
             pass_ground.setFilterFieldName("z");

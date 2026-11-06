@@ -22,10 +22,10 @@ umap_node:
   
 tracker_node:
   # params for matching
-  DYNAMIC_IOU_THRESHOLD: 0.1 #0为不筛选
+  DYNAMIC_IOU_THRESHOLD: 0.0 #0为不筛选 (was 0.1: fast motion -> old/new boxes stop overlapping -> IoU<0.1 killed near matches -> ID churn)
   DYNAMIC_DIST_THRESHOLD: 5.0
-  iou_weight: 0.7
-  dist_weight: 0.3
+  iou_weight: 0.2
+  dist_weight: 0.8
 
   UNMATCHED_PUBLISH_TIMEOUT: 0.5 # seconds, how long to keep publishing unmatched dynamic trackers
   MAX_TRACKER_AGE: 10.0 # seconds, max age of a tracker without updates

@@ -53,7 +53,22 @@ class PrarSamNode:
         """Setup ROS subscribers and publishers"""
         # Subscribers
         image_topic = rospy.get_param('~image_topic', '/camera/rgb/image_raw')
-        self.image_sub = rospy.Subscriber(image_topic, Image, self._handle_image_message, queue_size=1)
+        # Visualization publishing (RViz-only) is skipped in headless experiments
+        # to keep this single-threaded node from blocking on per-frame image encode.
+        self.enable_visualization = rospy.get_param('~enable_visualization', True)
+        # SAM consumes coarse tracks (~21Hz) slower than they are produced (~26Hz),
+        # so without dropping, frames queue and e2e latency grows without bound
+        # (+0.15s/s, reaching 1-2s). Skip any coarse frame already older than this
+        # so SAM always works on the freshest track the planner needs. 0 disables.
+        self.max_stale = rospy.get_param('~max_stale', 0.15)
+        # buff_size must exceed one serialized frame (640x480x3 ~= 900KB), else
+        # rospy's default 64KB socket buffer backs up and image frames accumulate
+        # in the TCP buffer, starving the obstacle callback on this single thread.
+        # This caused SAM e2e latency to grow ~0.1s/s without bound (stale tracks
+        # ~1s behind reality). 16MB holds ~18 frames so the receiver drains faster
+        # than frames arrive.
+        self.image_sub = rospy.Subscriber(image_topic, Image, self._handle_image_message,
+                                          queue_size=1, buff_size=2**24)
         
         self.obstacles_sub = rospy.Subscriber(
                 'tracker/dynamic_obstacles', Obstacles, self._process_dynamic_obstacles, queue_size=1)
@@ -90,26 +105,47 @@ class PrarSamNode:
         if not obstacles_msg.box_ids:
             # rospy.logwarn("No bounding boxes received")
             return
+
+        # Drop stale frames: if a newer coarse frame is already queued behind this
+        # one, processing this one only adds latency. Keeps SAM on the freshest track.
+        if self.max_stale > 0.0:
+            age = (rospy.Time.now() - obstacles_msg.header.stamp).to_sec()
+            if age > self.max_stale:
+                rospy.logdebug(f"Dropping stale coarse frame (age={age:.3f}s > {self.max_stale}s)")
+                return
         
         try:
+            cb_start = time.time()
             # Extract features from all ROIs (returns overlay_image)
             extracted_features, valid_rois, masks, processing_stats, binary_mask, overlay_image = self._extract_features_from_obstacles(
                 obstacles_msg)
-            
-            # Create visualizations
-            vis_image = make_visualization_image(
-                self.current_image, obstacles_msg, valid_rois,
-                self.color_generator, self.config)
 
-            # Create mask debug visualization
-            mask_debug_vis = make_mask_debug_visualization(
-                self.image_processor, self.current_image, obstacles_msg, masks)
-            
+            # Visualization images cost per-frame cv2_to_imgmsg on 900KB frames but
+            # are only consumed by RViz. In headless experiments nobody subscribes,
+            # so building/publishing them only blocks this single-threaded node and
+            # adds latency to the tracker the planner actually consumes.
+            t_vis = time.time()
+            if self.enable_visualization:
+                vis_image = make_visualization_image(
+                    self.current_image, obstacles_msg, valid_rois,
+                    self.color_generator, self.config)
+                mask_debug_vis = make_mask_debug_visualization(
+                    self.image_processor, self.current_image, obstacles_msg, masks)
+            else:
+                vis_image = None
+                mask_debug_vis = None
+                overlay_image = None
+            t_vis = time.time() - t_vis
+
             # Publish all results
-            self._publish_results(obstacles_msg=obstacles_msg, features=extracted_features, 
-                                valid_rois=valid_rois, vis_image=vis_image, mask_debug_vis=mask_debug_vis, 
+            t_pub = time.time()
+            self._publish_results(obstacles_msg=obstacles_msg, features=extracted_features,
+                                valid_rois=valid_rois, vis_image=vis_image, mask_debug_vis=mask_debug_vis,
                                 processing_stats=processing_stats, binary_mask=binary_mask, overlay_image=overlay_image)
-            
+            t_pub = time.time() - t_pub
+            rospy.loginfo(f"SAM cb: extract+vis+pub total={time.time()-cb_start:.3f}s "
+                          f"(sam={processing_stats.get('total_time', 0):.3f} vis={t_vis:.3f} pub={t_pub:.3f})")
+
         except Exception as e:
             rospy.logerr(f"Obstacle processing failed: {e}")
     
@@ -346,9 +382,10 @@ class PrarSamNode:
                 rospy.logdebug("Published segmented image")
             
             # 2. Visualization image
-            vis_msg = self.bridge.cv2_to_imgmsg(vis_image, "bgr8")
-            vis_msg.header = obstacles_msg.header
-            self.vis_pub.publish(vis_msg)
+            if vis_image is not None:
+                vis_msg = self.bridge.cv2_to_imgmsg(vis_image, "bgr8")
+                vis_msg.header = obstacles_msg.header
+                self.vis_pub.publish(vis_msg)
             
             # 3. Mask debug visualization (vectorized)
             if mask_debug_vis is not None and self.config.ENABLE_MASK_DEBUG:

@@ -207,7 +207,9 @@ std::vector<std::pair<int, int>> rematchNode::association(Eigen::MatrixXd &cost_
 /// @param curr_obstacles Vector of current obstacles
 void rematchNode::matchAndUpdate(const std::vector<rematchNode::ObstacleMeasureFeature> &curr_obstacles)
 {
-    double current_time = ros::Time::now().toSec();
+    // Preserve the source measurement timestamp through the asynchronous
+    // appearance path; wall-clock completion time is not a measurement time.
+    const double current_time = curr_obstacles_raw_.header.stamp.toSec();
     id_mapping_.clear();
 
     // 0. 若tracker列表为空，则直接将观测的obstacles转为tracker加入
@@ -369,7 +371,7 @@ void rematchNode::publishTrackerDetails(double current_time) {
     umap::TrackerDetailArray tracker_details_msg;
     
     // Set header
-    tracker_details_msg.header.stamp = ros::Time::now();
+    tracker_details_msg.header.stamp = ros::Time(current_time);
     tracker_details_msg.header.frame_id = rematch_params_.REMATCH_OUTPUT_FRAME;
     
     // Populate tracker data

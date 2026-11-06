@@ -59,14 +59,16 @@ private:
     tf2_ros::TransformListener tf_listener_;
 
     /// @brief Transform a 3D point from `source_frame` to COARSE_OUTPUT_FRAME
-    /// at `stamp`. On lookup failure, returns false and logs a throttled WARN
-    /// — caller MUST skip the KF update for that detection (only predict()
-    /// is allowed). Do not silently fall back to a different frame, which
-    /// would pollute KF state semantics.
+    /// at `stamp`. On lookup failure, returns false — caller MUST skip the KF
+    /// update for that detection (only predict() is allowed). Do not silently
+    /// fall back to a different frame, which would pollute KF state semantics.
+    /// @param tf_failure_count  Incremented on failure; first failure logs
+    ///                          WARN, subsequent failures log DEBUG.
     bool transformPointToOutputFrame(const Eigen::Vector3d& in,
                                      const std::string& source_frame,
                                      const ros::Time& stamp,
-                                     Eigen::Vector3d& out) const;
+                                     Eigen::Vector3d& out,
+                                     int& tf_failure_count) const;
 
     std::map<int, std::vector<geometry_msgs::PoseStamped>> tracker_paths_; // Store historical positions for each tracker
     const size_t max_path_length_ = 100; // Maximum number of historical positions to store

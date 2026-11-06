@@ -73,16 +73,15 @@ void trackerNode::publishVisualization() {
             marker.pose.position.z = state.position.z();
 
             // Set marker size. The dimensions come from the sensor optical
-            // frame (width=x_extent, height=y_extent, thickness=z_extent in
-            // d435_color_optical_frame) and we render an AABB in
-            // COARSE_OUTPUT_FRAME (typically odom: x=fwd, y=left, z=up).
-            // Approximate by mapping optical→odom axes assuming the camera
-            // points roughly along odom-x; full OBB rendering is out of
-            // scope (frame-honest refactor only).
+            // frame (width=x_extent, height=y_extent, thickness=z_extent).
+            // kFrameId is COARSE_VIS_FRAME, the same optical frame the state
+            // and curr_sizes_ are already expressed in — direct copy, no
+            // axis swap. The TF chain rotates the whole marker (position and
+            // axis-aligned scale) into the Fixed Frame for display.
             if (measurement_id < curr_sizes_.size()) {
-                marker.scale.x = curr_sizes_[measurement_id][2]; // odom fwd  ← optical z (thickness)
-                marker.scale.y = curr_sizes_[measurement_id][0]; // odom left ← optical x (width)
-                marker.scale.z = curr_sizes_[measurement_id][1]; // odom up   ← optical y (height)
+                marker.scale.x = curr_sizes_[measurement_id][0]; // optical x (width)
+                marker.scale.y = curr_sizes_[measurement_id][1]; // optical y (height)
+                marker.scale.z = curr_sizes_[measurement_id][2]; // optical z (thickness)
             }
 
             // Add velocity information to marker description

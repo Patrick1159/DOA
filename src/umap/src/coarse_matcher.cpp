@@ -289,8 +289,10 @@ std::vector<std::pair<int, int>> trackerNode::association(const Eigen::MatrixXd&
 /// @param measurements Vector of new measurements
 /// @param bbox_sizes Vector of bounding box sizes(width height thickness)
 void trackerNode::matchAndUpdate(const std::vector<Eigen::Vector3d>& measurements, const std::vector<Eigen::Vector3d>& bbox_sizes) {
-    double current_time = ros::Time::now().toSec(); // system time
-    // double current_time = curr_boxes3D_raw_.header.stamp.toSec(); // sensor time
+    // Tracker propagation must use the measurement time, never completion
+    // time.  This keeps replay, live operation, and offline evaluation on the
+    // same sensor time axis and avoids CPU/GPU load changing the KF delta-t.
+    const double current_time = curr_boxes3D_raw_.header.stamp.toSec();
 
     // updateTrackerLifecycles(trackers_, current_time);
 

@@ -1,0 +1,70 @@
+umap_node:
+  # Processing parameters
+  threshold_point: 0.03 # 0.035 + 5.5
+  threshold_line: 5.0 # 5.0good
+  min_length_line: 30 # tuned: restore archived value to suppress short spurious segments
+  row_downsample: 1 # useless param
+ 
+  # Depth parameters
+  max_dist: 4500.0 # tuned per-scene: humans reach ~3.9m; excludes far background
+  min_dist: 0.0
+  hist_size: 250 # 250
+  depth_factor: 1000.0 # Real depth = value / depth_factor
+  inverse_depth: false
+  enable_horizontal_merge: true # keep updated default (merge consolidates; with max_dist cut, background is gone anyway)
+  merge_horizontal_gap: 300 # tuned up: merge person column-segments
+  merge_max_row_gap: 30 # tuned up
+  merge_min_vertical_overlap_ratio: 0.1 # tuned down: merge with less overlap
+  enable_adaptive_horizontal_merge: true # keep updated default
+  adaptive_merge_min_gap: 20
+  adaptive_merge_max_gap: 300 # tuned up
+  adaptive_merge_near_ratio: 0.25
+  adaptive_merge_far_ratio: 0.85
+
+  # Camera parameters
+  camera_frame: "d400_depth_optical_frame"
+  camera:
+    fx: 605.3289184570312
+    fy: 603.8843994140625
+    cx: 325.57720947265625
+    cy: 242.66864013671875
+  
+tracker_node:
+  # params for matching
+  DYNAMIC_IOU_THRESHOLD: 0.07 #0为不筛选
+  DYNAMIC_DIST_THRESHOLD: 2.5 # 2.0
+  iou_weight: 0.3
+  dist_weight: 0.7
+
+  UNMATCHED_PUBLISH_TIMEOUT: 0.7 # seconds, how long to keep publishing unmatched dynamic trackers
+  EXPANSION_RATE: 0.5 # per second dimension expansion rate for dynamic trackers
+  MAX_TRACKER_AGE: 0.7 # seconds, max age of a tracker without updates
+  # params for determination of dynamic obstacles
+  DYNAMIC_VELOCITY_THRESHOLD: 0.25
+  DYNAMIC_VELOCITY_MAX: 5.0
+
+  SUSTAINED_VELOCITY_THRESHOLD: 0.1
+  SUSTAINED_VELOCITY_COUNT: 3
+
+  AVERAGE_DEPLACEMENT_THRESHOLD: 0.1
+  HISTORY_SIZE: 5 # History size for pos & vel
+  # params for isDynamic
+  STATUS_HISTORY_SIZE: 5
+  MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 4 # 3
+
+  # Visualization frame id
+  COARSE_VIS_FRAME: "odom" #d400_depth_optical_frame
+
+rematch_node:
+  SIMILARITY_THRESHOLD: 0.35 # 0.6
+  SIMILARITY_WEIGHT: 0.5
+
+  IOU_THRESHOLD: -0.1 # set to negative to disabe IOU filtering
+  IOU_WEIGHT: 0.7
+
+  DISTANCE_THRESHOLD: 0.8 # 2.0
+  DISTANCE_WEIGHT: 0.5
+  MAX_TRACKER_AGE : 0.5 # 1.0
+  UNMATCHED_PUBLISH_TIMEOUT: 0.5 # tuned: shorten (was 1.0) — split per-window human tracks like archived
+  EXPANSION_RATE: 3.0 # per second dimension expansion rate for dynamic trackers
+  REMATCH_VIS_FRAME: "odom" #d400_depth_optical_frame

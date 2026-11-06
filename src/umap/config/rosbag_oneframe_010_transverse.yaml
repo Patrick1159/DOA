@@ -1,0 +1,56 @@
+umap_node:
+  threshold_point: 0.03
+  threshold_line: 4.8
+  min_length_line: 25
+  row_downsample: 1
+  max_dist: 4000.0
+  min_dist: 0.0
+  hist_size: 250
+  depth_factor: 1000.0
+  inverse_depth: false
+  enable_horizontal_merge: true
+  merge_horizontal_gap: 300
+  merge_max_row_gap: 30
+  merge_min_vertical_overlap_ratio: 0.1
+  enable_adaptive_horizontal_merge: true
+  adaptive_merge_min_gap: 20
+  adaptive_merge_max_gap: 300
+  adaptive_merge_near_ratio: 0.25
+  adaptive_merge_far_ratio: 0.85
+  camera_frame: "d400_depth_optical_frame"
+  camera:
+    fx: 605.3289184570312
+    fy: 603.8843994140625
+    cx: 325.57720947265625
+    cy: 242.66864013671875
+
+tracker_node:
+  DYNAMIC_IOU_THRESHOLD: 0.07
+  DYNAMIC_DIST_THRESHOLD: 2.5
+  iou_weight: 0.3
+  dist_weight: 0.7
+  UNMATCHED_PUBLISH_TIMEOUT: 0.7
+  EXPANSION_RATE: 0.5
+  MAX_TRACKER_AGE: 0.7
+  DYNAMIC_VELOCITY_THRESHOLD: 0.10
+  DYNAMIC_VELOCITY_MAX: 5.0
+  CANDIDATE_VELOCITY_THRESHOLD: 0.10
+  SUSTAINED_VELOCITY_THRESHOLD: 0.10
+  SUSTAINED_VELOCITY_COUNT: 1
+  AVERAGE_DEPLACEMENT_THRESHOLD: 0.1
+  HISTORY_SIZE: 10
+  STATUS_HISTORY_SIZE: 3
+  MIN_CONSECUTIVE_FRAMES_FOR_STATUS_CHANGE: 1
+  COARSE_VIS_FRAME: "odom"
+
+rematch_node:
+  SIMILARITY_THRESHOLD: 0.35
+  SIMILARITY_WEIGHT: 0.5
+  IOU_THRESHOLD: -0.1
+  IOU_WEIGHT: 0.7
+  DISTANCE_THRESHOLD: 2.0
+  DISTANCE_WEIGHT: 0.5
+  MAX_TRACKER_AGE: 1.0
+  UNMATCHED_PUBLISH_TIMEOUT: 0.5
+  EXPANSION_RATE: 3.0
+  REMATCH_VIS_FRAME: "odom"

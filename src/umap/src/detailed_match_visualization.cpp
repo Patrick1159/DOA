@@ -115,15 +115,17 @@ visualization_msgs::Marker rematchNode::createObstacleMarker(
     marker.pose.position.y = state.position.y();
     marker.pose.position.z = state.position.z();
 
-    // Box dimensions. Obstacles message fields are now semantic
+    // Box dimensions. Obstacles message fields are semantic
     // (width = optical x-extent, height = optical y-extent,
-    // thickness = optical z-extent). Rendering in odom (x=fwd, y=left, z=up)
-    // assumes camera looks along +x of odom (approximation; OBB out of scope).
+    // thickness = optical z-extent). REMATCH_VIS_FRAME is the same optical
+    // frame the state and curr_sizes_ are already expressed in — direct
+    // copy, no axis swap. The TF chain rotates the whole marker into the
+    // Fixed Frame for display.
     if (measurement_id < static_cast<int>(curr_sizes_.size())) {
         auto corners = createBoundingBoxCorners(
-            curr_sizes_[measurement_id][2],  // x-extent (fwd)  ← optical z (thickness)
-            curr_sizes_[measurement_id][0],  // y-extent (left) ← optical x (width)
-            curr_sizes_[measurement_id][1]); // z-extent (up)   ← optical y (height)
+            curr_sizes_[measurement_id][0],  // optical x (width)
+            curr_sizes_[measurement_id][1],  // optical y (height)
+            curr_sizes_[measurement_id][2]); // optical z (thickness)
         addBoundingBoxEdges(marker, corners);
     }
 

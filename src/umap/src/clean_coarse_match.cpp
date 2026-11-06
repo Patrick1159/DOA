@@ -57,7 +57,7 @@ trackerNode::~trackerNode() {
 /// @brief  Main function for processing 3D boxes. Convert 3D bounding boxes to tracker measurements.
 /// @param boxes3D_msg
 void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
-    ROS_DEBUG_NAMED("Coarse tracker", "\n\n========== [Tracker] New Frame ==========");
+    ROS_INFO("[Coarse tracker]\n\n========== [Tracker] New Frame ==========");
     curr_boxes3D_raw_ = boxes3D_msg; // Store raw 3D boxes from message
 
     const std::string source_frame = boxes3D_msg.header.frame_id;
@@ -78,14 +78,15 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     std::vector<sensor_msgs::Image> masks;
     std::vector<size_t> kept_indices;  // original boxes3D_msg index per kept measurement
 
+    int tf_failure_count = 0;
     for (size_t i = 0; i < boxes3D_msg.box_ids.size(); i++) {
         Eigen::Vector3d measurement_src, measurement_out, size;
         measurement_src << boxes3D_msg.x[i], boxes3D_msg.y[i], boxes3D_msg.z[i];
 
-        if (!transformPointToOutputFrame(measurement_src, source_frame, stamp, measurement_out)) {
+        if (!transformPointToOutputFrame(measurement_src, source_frame, stamp, measurement_out, tf_failure_count)) {
             // TF lookup failed — skip this detection entirely. KF will only
             // predict() for matched trackers in this frame, preserving
-            // output-frame state semantics. Already warned inside the helper.
+            // output-frame state semantics. First failure is warned inside the helper.
             continue;
         }
 
@@ -102,7 +103,11 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
         size << boxes3D_msg.width[i], boxes3D_msg.height[i], boxes3D_msg.thickness[i];
         measurements.push_back(measurement_out);
         sizes.push_back(size);
-        masks.push_back(boxes3D_msg.mask[i]);
+        if (i < boxes3D_msg.mask.size()) {
+            masks.push_back(boxes3D_msg.mask[i]);
+        } else {
+            masks.push_back(sensor_msgs::Image());
+        }
         kept_indices.push_back(i);
 
         ROS_INFO_STREAM("[Coarse tracker] Box " << i
@@ -146,17 +151,29 @@ void trackerNode::boxes3DCallback(const umap::BoundingBoxes3D& boxes3D_msg) {
     // 2. Publish visualization
     publishVisualization();
 
+    const size_t total_boxes = boxes3D_msg.box_ids.size();
+    ROS_INFO_STREAM("[Coarse tracker] Frame summary: " << measurements.size()
+                    << " of " << total_boxes << " boxes kept"
+                    << " (dropped=" << (total_boxes - measurements.size())
+                    << ", tf_failures=" << tf_failure_count << ")");
+
     ROS_DEBUG_NAMED("Coarse tracker", "=================Frame end================");
 }
 
 /// @brief Transform a point from `source_frame` to COARSE_OUTPUT_FRAME at
-/// `stamp`. Returns false on lookup failure (with a throttled WARN); caller
-/// MUST skip the affected measurement in that case (do not write a fallback
-/// value into KF state — that would mix frames).
+/// `stamp`. Returns false on lookup failure; caller MUST skip the affected
+/// measurement in that case (do not write a fallback value into KF state —
+/// that would mix frames).
+///
+/// @param tf_failure_count  Incremented on failure. On the first failure
+///                          (count == 0 before increment), logs a non-throttled
+///                          WARN. Subsequent failures in the same callback
+///                          invocation are logged at DEBUG.
 bool trackerNode::transformPointToOutputFrame(const Eigen::Vector3d& in,
                                               const std::string& source_frame,
                                               const ros::Time& stamp,
-                                              Eigen::Vector3d& out) const {
+                                              Eigen::Vector3d& out,
+                                              int& tf_failure_count) const {
     const std::string& target = params_.COARSE_OUTPUT_FRAME;
     if (source_frame.empty() || source_frame == target) {
         out = in;
@@ -169,12 +186,20 @@ bool trackerNode::transformPointToOutputFrame(const Eigen::Vector3d& in,
     p_in.point.y = in.y();
     p_in.point.z = in.z();
     try {
-        // Wait briefly for the transform — covers stamp-vs-now skew.
-        tf_buffer_.transform(p_in, p_out, target, ros::Duration(0.05));
+        // Wait for the transform — covers stamp-vs-now skew. 0.2s is
+        // generous enough for real UMAP image timestamps that may lag
+        // behind the TF buffer's latest available transform.
+        tf_buffer_.transform(p_in, p_out, target, ros::Duration(0.2));
     } catch (const tf2::TransformException& ex) {
-        ROS_WARN_THROTTLE(2.0,
-            "[Coarse tracker] TF lookup %s ← %s @ %.3f failed: %s — skipping measurement",
-            target.c_str(), source_frame.c_str(), stamp.toSec(), ex.what());
+        if (tf_failure_count == 0) {
+            ROS_WARN("[Coarse tracker] TF lookup %s <- %s @ %.3f failed: %s — skipping measurement"
+                     " (further failures in this frame suppressed)",
+                     target.c_str(), source_frame.c_str(), stamp.toSec(), ex.what());
+        } else {
+            ROS_DEBUG("[Coarse tracker] TF lookup %s <- %s @ %.3f failed: %s — skipping measurement",
+                      target.c_str(), source_frame.c_str(), stamp.toSec(), ex.what());
+        }
+        tf_failure_count++;
         return false;
     }
     out << p_out.point.x, p_out.point.y, p_out.point.z;
